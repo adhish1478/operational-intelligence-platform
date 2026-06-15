@@ -1,62 +1,128 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #020617;
-  --color-surface: rgba(15, 23, 42, 0.6);
-  --color-primary: #6366f1;
-  --color-critical: #ef4444;
-  --color-warning: #f59e0b;
-  --color-success: #10b981;
-  --color-glass: rgba(255, 255, 255, 0.05);
-  --color-glass-border: rgba(255, 255, 255, 0.1);
+  --color-background: #F7F9FB;
   
+  /* Surfaces & Containers */
+  --color-surface: #FFFFFF;
+  --color-surface-dim: #D8DADC;
+  --color-surface-bright: #F7F9FB;
+  --color-surface-lowest: #FFFFFF;
+  --color-surface-low: #F2F4F6;
+  --color-surface-container: #ECEEF0;
+  --color-surface-high: #E6E8EA;
+  --color-surface-highest: #E0E3E5;
+  
+  /* Text and Lines */
+  --color-on-surface: #191C1E;
+  --color-on-surface-variant: #45464D;
+  --color-outline: #76777D;
+  --color-outline-variant: #C6C6CD;
+  
+  /* Branding / Primary / Actions */
+  --color-primary: #0F172A;
+  --color-on-primary: #FFFFFF;
+  --color-primary-container: #131B2E;
+  --color-on-primary-container: #7C839B;
+  
+  --color-secondary: #515F74;
+  --color-on-secondary: #FFFFFF;
+  --color-secondary-container: #D5E3FD;
+  --color-on-secondary-container: #57657B;
+  
+  /* Semantic Statuses */
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-error: #BA1A1A;
+  --color-error-container: #FFDAD6;
+  --color-on-error: #FFFFFF;
+  --color-on-error-container: #93000A;
+
+  /* Typography Scales */
   --font-sans: "Inter", system-ui, sans-serif;
-  --font-serif: "Outfit", serif;
   --font-mono: "JetBrains Mono", monospace;
-  
+
+  --text-headline-lg: 24px;
+  --text-headline-lg--line-height: 32px;
+  --text-headline-lg--letter-spacing: -0.02em;
+  --text-headline-lg--font-weight: 600;
+
+  --text-headline-md: 18px;
+  --text-headline-md--line-height: 24px;
+  --text-headline-md--letter-spacing: -0.01em;
+  --text-headline-md--font-weight: 600;
+
+  --text-headline-sm: 14px;
+  --text-headline-sm--line-height: 20px;
+  --text-headline-sm--font-weight: 600;
+
+  --text-body-md: 14px;
+  --text-body-md--line-height: 20px;
+
+  --text-body-sm: 13px;
+  --text-body-sm--line-height: 18px;
+
+  --text-label-caps: 11px;
+  --text-label-caps--line-height: 16px;
+  --text-label-caps--letter-spacing: 0.05em;
+  --text-label-caps--font-weight: 600;
+
+  --text-mono-label: 12px;
+  --text-mono-label--line-height: 16px;
+
+  /* Shape Radii */
+  --radius-sm: 2px;
+  --radius-default: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
   --radius-xl: 12px;
-  --radius-2xl: 16px;
+
+  /* Spacing Grid (4px rules) */
+  --spacing-density-compact: 4px;
+  --spacing-density-comfortable: 12px;
+  --spacing-gutter: 16px;
+  --spacing-container-padding: 24px;
+  --spacing-sidebar-width: 240px;
 }
 
 @layer base {
   body {
-    @apply bg-background text-slate-100 font-sans antialiased selection:bg-primary/30;
-    background-image: 
-      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(239, 68, 68, 0.1) 0px, transparent 50%);
+    @apply bg-background text-on-surface font-sans antialiased;
     min-height: 100vh;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-serif font-semibold tracking-tight;
+    @apply font-semibold tracking-tight;
   }
 }
 
 @layer utilities {
-  .glass {
-    @apply bg-surface backdrop-blur-xl border border-glass-border;
-  }
-  
-  .glass-hover {
-    @apply hover:bg-white/10 hover:border-white/20 transition-all duration-300;
-  }
-  
-  .glow-critical {
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
-  }
-  
-  .glow-primary {
-    box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+  .border-outline-subtle {
+    @apply border border-outline-variant;
   }
 
-  .text-gradient {
-    @apply bg-clip-text text-transparent bg-linear-to-br from-white to-slate-400;
+  /* Status Badge Light Fill Styles */
+  .badge-critical {
+    @apply bg-error-container text-error font-semibold px-2 py-0.5 rounded-sm text-body-sm;
+  }
+
+  .badge-warning {
+    @apply bg-warning/10 text-warning font-semibold px-2 py-0.5 rounded-sm text-body-sm;
+  }
+
+  .badge-success {
+    @apply bg-success/10 text-success font-semibold px-2 py-0.5 rounded-sm text-body-sm;
+  }
+
+  .badge-info {
+    @apply bg-secondary-container text-secondary font-semibold px-2 py-0.5 rounded-sm text-body-sm;
   }
 }
 
-/* Custom Scrollbar */
+/* Custom Scrollbar (Compact & Subtle) */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -64,5 +130,5 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+  @apply bg-outline-variant rounded-full hover:bg-outline/30 transition-colors;
 }

@@ -5,8 +5,8 @@ import {
     Layers,
     FileBarChart,
     Settings,
-    Zap,
-    Search
+    ChevronDown,
+    Zap
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { clsx, type ClassValue } from 'clsx';
@@ -17,46 +17,46 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-    { icon: AlertCircle, label: 'Issues', path: '/issues' },
+    { icon: LayoutDashboard, label: 'Attention Deck', path: '/dashboard' },
+    { icon: AlertCircle, label: 'Investigations', path: '/investigations' },
     { icon: Layers, label: 'Integrations', path: '/integrations' },
     { icon: FileBarChart, label: 'Reports', path: '/reports' },
 ];
 
 export const Sidebar: React.FC = () => {
     return (
-        <aside className="w-64 glass border-r border-white/10 flex flex-col h-screen sticky top-0">
-            <div className="p-6 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-primary glow-primary flex items-center justify-center">
-                    <Zap className="text-white w-5 h-5 fill-current" />
-                </div>
-                <span className="text-xl font-serif font-bold text-gradient">OIP</span>
+        <aside className="w-[240px] bg-surface-low border-r border-outline-variant flex flex-col h-screen sticky top-0">
+            {/* Workspace / Org Switcher */}
+            <div className="p-4 border-b border-outline-variant">
+                <button className="w-full flex items-center gap-2 p-2 rounded bg-surface border border-outline-variant hover:bg-surface-high transition-colors text-left group">
+                    <div className="w-6 h-6 rounded bg-primary flex items-center justify-center shrink-0">
+                        <Zap className="text-white w-4.5 h-4.5 fill-current" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <h4 className="text-body-sm font-semibold truncate text-on-surface">Global Workspace</h4>
+                        <p className="text-[10px] text-on-surface-variant truncate">Global Ops / Dev</p>
+                    </div>
+                    <ChevronDown className="w-4 h-4 text-on-surface-variant group-hover:text-on-surface shrink-0" />
+                </button>
             </div>
 
-            <nav className="flex-1 px-4 py-4 space-y-2">
-                <div className="mb-4">
-                    <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:text-white transition-colors group">
-                        <Search className="w-4 h-4" />
-                        <span className="text-sm">Search...</span>
-                        <kbd className="ml-auto text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-slate-500 font-mono">⌘K</kbd>
-                    </button>
-                </div>
-
+            {/* Navigation links */}
+            <nav className="flex-1 px-3 py-4 space-y-1">
                 {navItems.map((item) => (
                     <NavLink
                         key={item.path}
                         to={item.path}
                         className={({ isActive }) => cn(
-                            "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 group",
+                            "flex items-center gap-2.5 px-3 py-2 rounded text-body-sm transition-all duration-150 group",
                             isActive
-                                ? "bg-primary/10 text-primary border border-primary/20"
-                                : "text-slate-400 hover:bg-white/5 hover:text-white border border-transparent"
+                                ? "bg-surface-container text-on-surface font-semibold border border-outline-variant/60"
+                                : "text-on-surface-variant hover:bg-surface-high hover:text-on-surface border border-transparent"
                         )}
                     >
-                        <item.icon className="w-5 h-5" />
-                        <span className="font-medium text-sm">{item.label}</span>
-                        {item.label === 'Issues' && (
-                            <span className="ml-auto bg-critical/20 text-critical text-[10px] px-1.5 py-0.5 rounded-full font-bold glow-critical">
+                        <item.icon className="w-4.5 h-4.5" />
+                        <span className="flex-1">{item.label}</span>
+                        {item.label === 'Investigations' && (
+                            <span className="bg-error-container text-error text-[10px] px-1.5 py-0.5 rounded font-bold">
                                 3
                             </span>
                         )}
@@ -64,19 +64,31 @@ export const Sidebar: React.FC = () => {
                 ))}
             </nav>
 
-            <div className="p-4 border-t border-white/10">
+            {/* Settings & User Profile Footer */}
+            <div className="p-3 border-t border-outline-variant space-y-2">
                 <NavLink
                     to="/settings"
                     className={({ isActive }) => cn(
-                        "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200",
+                        "flex items-center gap-2.5 px-3 py-2 rounded text-body-sm transition-all duration-150",
                         isActive
-                            ? "bg-primary/10 text-primary border border-primary/20"
-                            : "text-slate-400 hover:bg-white/5 hover:text-white border border-transparent"
+                            ? "bg-surface-container text-on-surface font-semibold border border-outline-variant/60"
+                            : "text-on-surface-variant hover:bg-surface-high hover:text-on-surface border border-transparent"
                     )}
                 >
-                    <Settings className="w-5 h-5" />
-                    <span className="font-medium text-sm">Settings</span>
+                    <Settings className="w-4.5 h-4.5" />
+                    <span>Settings</span>
                 </NavLink>
+
+                {/* User avatar and profile card */}
+                <div className="flex items-center gap-2.5 p-2 rounded hover:bg-surface-high transition-colors">
+                    <div className="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container font-bold flex items-center justify-center text-xs">
+                        AA
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <h5 className="text-[12px] font-semibold text-on-surface truncate">Adhish Aravind</h5>
+                        <p className="text-[10px] text-on-surface-variant truncate">Lead SecOps / Admin</p>
+                    </div>
+                </div>
             </div>
         </aside>
     );
