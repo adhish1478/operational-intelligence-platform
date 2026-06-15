@@ -1,0 +1,27 @@
+# Root Git Ignore File for OIP (Operational Intelligence Platform)
+
+# Python Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment configurations containing secrets
+.env
+.env.local
+.env.*.local
+
+# Python cache and build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
