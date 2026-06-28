@@ -7,7 +7,7 @@ This document is the **single source of truth** for all backend development. It 
 ## Completion scorecard
 
 *   **Phase 0 - Foundation:** 100%
-*   **Phase 1 - Organizations & Multi-Tenancy:** 37.5%
+*   **Phase 1 - Organizations & Multi-Tenancy:** 50%
 *   **Phase 2 - Investigations:** 0%
 *   **Phase 3 - Evidence:** 0%
 *   **Phase 4 - Integrations:** 0%
@@ -39,7 +39,7 @@ This document is the **single source of truth** for all backend development. It 
 
 ---
 
-## Phase 1 - Organizations & Multi-Tenancy (37.5%)
+## Phase 1 - Organizations & Multi-Tenancy (50%)
 
 *   **Goal:** Establish tenant isolation boundaries to isolate users, memberships, investigations, and integrations into Organizations.
 *   **Why it exists:** Multi-tenancy prevents cross-tenant data leaks. Access controls are scoped strictly to the organization to which a user belongs.
@@ -48,7 +48,7 @@ This document is the **single source of truth** for all backend development. It 
     *   [x] Design `Organization` database model (`id`, `name`, `slug`, `created_at`).
     *   [x] Design `Membership` association model (`id`, `user_id`, `organization_id`, `role`, `created_at`).
     *   [x] Link users to memberships in the authentication models.
-    *   [ ] Write Alembic migration to create organizations and memberships tables.
+    *   [x] Write Alembic migration to create organizations and memberships tables.
     *   [ ] Implement database CRUD operations in `organizations/services.py` (get by ID, get by slug, list, create, invite/add member, update role, remove member).
     *   [ ] Implement a global `ActiveOrganizationDep` FastAPI dependency to extract, validate, and inject the current organization tenant boundary using the `X-Organization-ID` header.
     *   [ ] Connect service methods to API route handlers in `organizations/routes.py`.
