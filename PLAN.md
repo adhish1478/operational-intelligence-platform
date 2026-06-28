@@ -54,24 +54,78 @@ To provide an "AI Chief of Staff" that transforms fragmented noise from Slack, J
 
 ## 4. Design System & Aesthetics
 
-**Theme:** Light Mode "Engineering-Grade" (Strict Slate & Neutral palette) aligned with the Stitch "Operational Command Center" project design.
+### 4.1. Design Philosophy & Evolution (Audit Decided)
+This platform adopts a **Modern Corporate** aesthetic—influenced by high-density, engineering-grade software like Linear and Palantir. It represents a pivot from the initial "Titanium & Glass" dark mode theme to a light-themed **"Operational Command Center"**:
+*   **Theme Shift:** Flat, high-legibility light mode surfaces with strict outlines and borders (`#C6C6CD` or `#E2E8F0`) instead of dark shadows or glowing translucent elements.
+*   **Precision & Authority:** Prioritize data density and functional hierarchy over decorative elements.
+*   **Tonal Layering:** Communicate depth using varying surface tones and low-contrast borders rather than heavy shadows.
+*   **Color as Signifier:** Limit the use of color to status, priority, and actions to minimize semantic noise. Avoid neon glows.
 
-### Color Strategy
-*   **Background:** Neutral-50 (`#F7F9FB`) flat clean surface.
-*   **Surface:** Pure White (`#FFFFFF`) with 1px Slate border (`#C6C6CD`). Tonal layering surfaces: Low (`#F2F4F6`), Medium (`#ECEEF0`), High (`#E6E8EA`).
-*   **Accent (Primary):** Slate-900 (`#0F172A`) for buttons and primary focus states.
-*   **Status Tones (No Glows, Light Fill background strategy):**
-    *   *Critical:* Hyper Red (`#BA1A1A`) with light container background (`#FFDAD6`).
-    *   *Warning:* Amber Gold (`#F59E0B`).
-    *   *Success:* Neon Emerald (`#10B981`).
+### 4.2. Color Palette
+The design system operates primarily in a light-mode scheme using Slate and Neutral tones:
 
-### Typography
-*   **Scale:** Compact hierarchy driven by *Inter* font family (13px/14px body standard) to maximize data density.
-*   **Mono:** *JetBrains Mono* (`mono-label` at 12px) for ID tags, timestamps, and log data.
+#### Foundation Colors
+*   **Background (Neutral-50):** `#F7F9FB`
+    *   *Usage:* Main application background. A clean, professional "off-white" that reduces screen glare.
+*   **Primary Text (Slate-900 / on-background):** `#191C1E` (Custom primary color `#0F172A` overrides text colors for maximum legibility).
+    *   *Usage:* Primary headings, text, and critical elements.
+*   **Borders & Boundaries (Slate-200 / outline-variant):** `#C6C6CD` (and secondary `#E2E8F0` / `#76777D` for high-contrast outlines).
+    *   *Usage:* Outer boundaries of cards, tables, search inputs, and sidebar borders.
 
-### Spacing & Shapes
-*   **Grid:** Strict 4px grid rules (Compact 4px, Comfortable 12px, Gutter 16px, Container Padding 24px).
-*   **Shapes:** Crisp 4px corner radius for buttons, inputs, and minor cards; 8px for large dashboard containers.
+#### Surfaces (Tonal Layering)
+*   **Surface Bright / Lowest Container:** `#FFFFFF`
+    *   *Usage:* Card backgrounds, modal windows, table rows.
+*   **Surface Container Low:** `#F2F4F6`
+    *   *Usage:* Input fields, inactive states, sidebar background.
+*   **Surface Container:** `#ECEEF0`
+    *   *Usage:* Inner wells, panel containers.
+*   **Surface Container High:** `#E6E8EA`
+    *   *Usage:* Hover states, active tabs.
+*   **Surface Container Highest / Surface Dim:** `#E0E3E5` / `#D8DADC`
+    *   *Usage:* Headers, active indicator boundaries.
+
+#### Semantic Tones (Inviolable Status Signifiers)
+*   **Primary Action (Slate-900 / Indigo):** `#0F172A` (Hover: `#1E293B`, Container: `#131B2E`)
+*   **Secondary Actions:** `#515F74` (Container: `#D5E3FD`)
+*   **Success (Emerald):** `#10B981` (On-Success: `#FFFFFF`)
+*   **Warning (Amber):** `#F59E0B` (On-Warning: `#FFFFFF`)
+*   **Error / Critical (Hyper Red):** `#BA1A1A` (Container: `#FFDAD6`, On-Error: `#FFFFFF`, On-Error-Container: `#93000A`)
+
+### 4.3. Typography
+Legibility in data-heavy layouts is driven by the **Inter** font family, with **JetBrains Mono** reserved for technical data (timestamps, logs, IDs).
+
+| Type Scale | Font Family | Font Size | Font Weight | Line Height | Letter Spacing | Usage |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Headline Large** | Inter | `24px` | 600 (Semi-bold) | `32px` | `-0.02em` | Main page titles |
+| **Headline Medium** | Inter | `18px` | 600 (Semi-bold) | `24px` | `-0.01em` | Card & drawer headers |
+| **Headline Small** | Inter | `14px` | 600 (Semi-bold) | `20px` | Normal | Table & list section headers |
+| **Body Medium** | Inter | `14px` | 400 (Regular) | `20px` | Normal | Body text, descriptions |
+| **Body Small** | Inter | `13px` | 400 (Regular) | `18px` | Normal | Data cells, secondary labels |
+| **Label Caps** | Inter | `11px` | 600 (Semi-bold) | `16px` | `0.05em` | Table column titles (uppercase) |
+| **Mono Label** | JetBrains Mono | `12px` | 400 (Regular) | `16px` | Normal | IDs, timestamps, log details |
+
+### 4.4. Spacing & Grid (The 4px Rule)
+All paddings, margins, gaps, and sizes must align to a strict 4px grid to enforce high data density.
+*   **Base Unit:** `4px`
+*   **Density Compact:** `4px` (e.g., cell padding in high-density tables)
+*   **Density Comfortable:** `12px` (e.g., standard button/input horizontal padding)
+*   **Gutter:** `16px` (e.g., spacing between grid items)
+*   **Container Padding:** `24px` (e.g., main content area outer margin)
+*   **Sidebar Width:** `240px` (fixed-width sidebar navigation)
+
+### 4.5. Shape & Corner Radii
+*   **sm (`0.125rem` / `2px`):** Very small components (checkboxes, status dots).
+*   **DEFAULT (`0.25rem` / `4px`):** Buttons, input fields, tags, mini cards.
+*   **md (`0.375rem` / `6px`):** Dropdowns, context menus.
+*   **lg (`0.5rem` / `8px`):** Large dashboard containers, main card blocks.
+*   **xl (`0.75rem` / `12px`):** Modals, large dialogue boxes.
+*   **full (`9999px`):** User avatars, pill-shaped status dots.
+
+### 4.6. Depth & Elevation
+*   **Level 0 (Background):** `#F7F9FB` (Neutral-50) flat background.
+*   **Level 1 (Default Card/Sidebar):** Pure `#FFFFFF` card background + 1px `#C6C6CD` or `#E2E8F0` border.
+*   **Level 2 (Popovers/Modals/Command Palette):** Pure `#FFFFFF` background + 1px `#C6C6CD` border + 4px blur shadow (`rgba(15, 23, 42, 0.05)`).
+*   **Dimming Overlay:** `#0F172A` with `20%` opacity behind modals.
 
 ---
 
@@ -168,6 +222,7 @@ export interface OperationalInvestigation {
 ---
 
 ## 8. Implementation Roadmap
+*Note: This roadmap corresponds to the frontend application execution.*
 
 ### Phase 1: Foundation
 *   [ ] Configure design system tokens in Tailwind and `index.css`.
@@ -192,3 +247,85 @@ export interface OperationalInvestigation {
 *   [ ] Global Command Palette integration (`⌘K`).
 *   [ ] Complete verification with mock data sets.
 *   [ ] Run `npm run lint` and `npm run build` validation checks.
+
+---
+
+## 9. Component Inventory
+
+### 9.1. Navigation & Layout Components
+
+#### Persistent Sidebar Navigation (`Sidebar`)
+*   **Width:** Fixed `240px`.
+*   **Background:** `Surface Container Low` (`#F2F4F6`) with a 1px right border (`#C6C6CD`).
+*   **Sections:**
+    *   *Workspace Switcher*: Dropdown to change org/workspace scopes.
+    *   *Main Navigation*: Attention Deck (Dashboard), Investigations Queue, Integrations, Reports, Settings.
+    *   *Interactive State*: Active items highlighted in `Surface Container` (`#ECEEF0`) with `Slate-900` text.
+
+#### Global Header (`Header`)
+*   **Background:** Pure `#FFFFFF` with a 1px bottom border.
+*   **Breadcrumbs:** Modern hierarchy links (e.g., `Investigations / TechCorp Escalation`) in `body-sm`.
+*   **Command Palette Quick-Launch:** Clicking the search icon or trigger button shows `⌘K` shortcut hint.
+
+#### Global Command Palette (`CommandPalette`)
+*   **Trigger:** Shortcut `⌘K` or header search click.
+*   **Aesthetic:** Centered modal popover, pure white background, 1px border, 4px blur shadow.
+*   **Features:**
+    *   Grouped list: *Actions*, *Investigations*, *Entities (Customers, Teams)*, *Integrations*.
+    *   Keyboard navigation supports `Enter` to open and `Esc` to exit.
+
+### 9.2. Dashboard Components (Attention Deck)
+
+#### Active Investigation Cards (`InvestigationAlertCard`)
+*   **Aesthetic:** White background container with 1px left accent border (Critical = Red, Warning = Amber, Info = Blue).
+*   **Layout:**
+    *   *Header*: Entity markers (e.g., Customer: TechCorp, Service: Auth Gateway) + Severity Badge.
+    *   *Body*: Investigation Title, business impact description, and detected duration.
+    *   *Action Zone*: Action buttons ("Start Triage", "Assign Owner", "Resolve") + source system icons.
+
+#### Business Impact Panel (`BusinessImpactAlerts`)
+*   **Aesthetic:** Bordered Slate-200 card containing high-contrast risk alerts (revenue risk, SLA breaches, customer churn threat indicators).
+*   **Layout:** Summarizes which key business metrics are actively threatened by unresolved investigations.
+
+### 9.3. Queue Components (`InvestigationsQueue`)
+
+#### High-Density Investigations Table (`InvestigationsTable`)
+*   **Aesthetic:** Bordered rows, no vertical grid lines, 4px vertical cell padding.
+*   **Rows:** Hover state highlights row with background `Neutral-100` (`#ECEEF0`).
+*   **Columns:**
+    *   *ID*: Text in `mono-label` (`JetBrains Mono`).
+    *   *Investigation*: Title and quick description.
+    *   *Impact*: Associated entity references (Customer, Project, Service).
+    *   *Severity*: "Light Fill" background status chip.
+    *   *Detected*: `mono-label` timestamp.
+    *   *Assignee*: User avatar.
+
+### 9.4. Investigation View Components (`InvestigationDetails`)
+
+#### Evidence Feed (`EvidenceFeed`)
+*   **Aesthetic:** Chronological list of incoming cross-platform evidence items.
+*   **Evidence Item Card:**
+    *   *Slack discussion*: Shows chat thread snippet, author name, avatar, and channel name.
+    *   *Jira tickets*: Shows ticket key (`mono-label`), assignee, status, and description.
+    *   *GitHub events*: Shows commit hash (`mono-label`), author, PR title, and repository name.
+    *   *Emails*: Shows sender, subject, and excerpt of the discussion.
+    *   *Notion docs*: Links to related workspace docs with snippet text.
+    *   *Metadata*: Action button to "Attach to Timeline" or "Mark as Key Evidence".
+
+#### Interactive Timeline (`Timeline`)
+*   **Aesthetic:** Vertical track connecting timeline nodes.
+*   **Nodes:** Interactive dots colored by event type (Integration event, human log comment, status transition).
+
+### 9.5. Entity Details Components (`EntityDashboard`)
+
+#### Entity Overview Header (`EntityHeader`)
+*   **Layout:** Title in `headline-lg`, entity type badge (e.g., Customer, Service), owner assignment, current risk level status card.
+
+#### Entity Risk Summary (`EntityRiskCard`)
+*   **Layout:** Breakdown of the active risks affecting this entity (e.g., 2 active Critical investigations, 5 linked Slack escalation logs).
+
+### 9.6. Integrations & Administration (`IntegrationsGrid`)
+
+#### Connector Cards
+*   **Aesthetic:** Grid layout with 16px gap.
+*   **Card:** Icon logo, status badge ("Connected", "Not Synced"), toggle switch, and configure button.
