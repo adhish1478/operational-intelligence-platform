@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import String, Boolean, DateTime, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
@@ -38,26 +38,10 @@ class User(Base):
         nullable=False,
     )
 
-    # =========================================================================
-    # TODO: FUTURE HOOKS (Phase 2 - Multi-Tenancy & RBAC Preparation)
-    # =========================================================================
-    #
-    # 1. Organization Support (Multi-Tenancy):
-    #    - One-to-Many or Many-to-Many relationship with Organization model.
-    #    - Example:
-    #      organization_id: Mapped[uuid.UUID | None] = mapped_column(
-    #          ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
-    #      )
-    #      organization: Mapped["Organization"] = relationship(back_populates="users")
-    #
-    # 2. Role Support (RBAC):
-    #    - Field mapping a single Role enum or a Many-to-Many relationship with a Role model.
-    #    - Example:
-    #      role: Mapped[str] = mapped_column(
-    #          String(50), default="viewer"  # e.g., admin, manager, viewer
-    #      )
-    #
-    # =========================================================================
+    # Relationships
+    memberships: Mapped[list["Membership"]] = relationship(
+        "Membership", back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User {self.email} (verified={self.is_verified})>"
