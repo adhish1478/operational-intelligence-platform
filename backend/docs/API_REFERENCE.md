@@ -201,3 +201,137 @@ Invalidates client session by clearing the Refresh Token cookie.
       "message": "Logged out successfully"
     }
     ```
+
+---
+
+## 4. Organizations Router Endpoints
+
+### 4.1. Create Organization
+*   **Route:** `/api/v1/organizations/`
+*   **Method:** `POST`
+*   **Authentication:** Required (`Authorization: Bearer <access_token>`)
+*   **Request Body Schema:**
+    ```json
+    {
+      "name": "Tesla Motors",
+      "slug": "tesla"
+    }
+    ```
+*   **Response Schema (201 Created):**
+    ```json
+    {
+      "name": "Tesla Motors",
+      "slug": "tesla",
+      "id": "e9dc2899-d267-4c72-bba6-040440b38363",
+      "created_at": "2026-06-29T15:31:14Z"
+    }
+    ```
+
+---
+
+### 4.2. List User Organizations
+*   **Route:** `/api/v1/organizations/`
+*   **Method:** `GET`
+*   **Authentication:** Required (`Authorization: Bearer <access_token>`)
+*   **Response Schema (200 OK):**
+    ```json
+    [
+      {
+        "name": "Tesla Motors",
+        "slug": "tesla",
+        "id": "e9dc2899-d267-4c72-bba6-040440b38363",
+        "created_at": "2026-06-29T15:31:14Z"
+      }
+    ]
+    ```
+
+---
+
+### 4.3. Get Organization Details
+*   **Route:** `/api/v1/organizations/{org_id}`
+*   **Method:** `GET`
+*   **Authentication:** Required (`Authorization: Bearer <access_token>`)
+*   **Response Schema (200 OK):**
+    ```json
+    {
+      "name": "Tesla Motors",
+      "slug": "tesla",
+      "id": "e9dc2899-d267-4c72-bba6-040440b38363",
+      "created_at": "2026-06-29T15:31:14Z"
+    }
+    ```
+
+---
+
+### 4.4. List Organization Members
+*   **Route:** `/api/v1/organizations/{org_id}/members`
+*   **Method:** `GET`
+*   **Authentication:** Required (`Authorization: Bearer <access_token>`)
+*   **Response Schema (200 OK):**
+    ```json
+    [
+      {
+        "id": "c1a011ef-93e1-4bb2-ad62-97ba513deaa5",
+        "user_id": "0bd40234-9aa0-4158-b78f-a38a968549f0",
+        "organization_id": "e9dc2899-d267-4c72-bba6-040440b38363",
+        "role": "admin",
+        "created_at": "2026-06-29T18:05:00Z"
+      }
+    ]
+    ```
+
+---
+
+### 4.5. Add/Invite Member
+*   **Route:** `/api/v1/organizations/{org_id}/members`
+*   **Method:** `POST`
+*   **Authentication:** Required (`Authorization: Bearer <access_token>` - Requester must be `owner`/`admin`)
+*   **Request Body Schema:**
+    ```json
+    {
+      "user_id": "0bd40234-9aa0-4158-b78f-a38a968549f0",
+      "role": "admin"
+    }
+    ```
+*   **Response Schema (201 Created):**
+    ```json
+    {
+      "id": "c1a011ef-93e1-4bb2-ad62-97ba513deaa5",
+      "user_id": "0bd40234-9aa0-4158-b78f-a38a968549f0",
+      "organization_id": "e9dc2899-d267-4c72-bba6-040440b38363",
+      "role": "admin",
+      "created_at": "2026-06-29T18:05:00Z"
+    }
+    ```
+
+---
+
+### 4.6. Modify Member Role
+*   **Route:** `/api/v1/organizations/{org_id}/members/{user_id}`
+*   **Method:** `PATCH`
+*   **Authentication:** Required (`Authorization: Bearer <access_token>` - Requester must be `owner`/`admin`)
+*   **Request Body Schema:**
+    ```json
+    {
+      "role": "viewer"
+    }
+    ```
+*   **Response Schema (200 OK):**
+    ```json
+    {
+      "id": "c1a011ef-93e1-4bb2-ad62-97ba513deaa5",
+      "user_id": "0bd40234-9aa0-4158-b78f-a38a968549f0",
+      "organization_id": "e9dc2899-d267-4c72-bba6-040440b38363",
+      "role": "viewer",
+      "created_at": "2026-06-29T18:05:00Z"
+    }
+    ```
+
+---
+
+### 4.7. Remove Member
+*   **Route:** `/api/v1/organizations/{org_id}/members/{user_id}`
+*   **Method:** `DELETE`
+*   **Authentication:** Required (`Authorization: Bearer <access_token>` - Requester must be `owner`/`admin` or self-removal)
+*   **Response Schema (204 No Content):** Empty
+
