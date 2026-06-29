@@ -73,14 +73,46 @@ async def get_active_organization(
     2. The organization exists in the database.
     3. The authenticated user holds a membership in the organization.
     """
-    # TODO: Implement active organization checks
-    # Example logic:
-    # 1. If not x_organization_id -> raise HTTP 400 Bad Request
-    # 2. Parse UUID. If invalid -> raise HTTP 400
-    # 3. Query Membership where user_id=current_user.id and organization_id=parsed_uuid
-    # 4. If not found -> raise HTTP 403 Forbidden
-    # 5. Query Organization by parsed_uuid and return Organization object
-    raise NotImplementedError("Implement get_active_organization in api/deps.py")
+    import uuid
+    if not x_organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Organization-ID header missing"
+        )
+    try:
+        org_uuid = uuid.UUID(x_organization_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid X-Organization-ID header format"
+        )
+
+    # Query membership locally to avoid circular dependencies
+    from sqlalchemy import select
+    from app.organizations.models import Membership, Organization
+
+    statement = select(Membership).where(
+        Membership.user_id == current_user.id,
+        Membership.organization_id == org_uuid
+    )
+    result = await db.execute(statement)
+    membership = result.scalar_one_or_none()
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not a member of this organization"
+        )
+
+    org_statement = select(Organization).where(Organization.id == org_uuid)
+    org_result = await db.execute(org_statement)
+    org = org_result.scalar_one_or_none()
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found"
+        )
+    return org
+
 
 
 ActiveOrganizationDep = Annotated[Organization, Depends(get_active_organization)]
