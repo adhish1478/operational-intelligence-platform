@@ -204,3 +204,35 @@ async def remove_org_member(
             detail=str(e)
         )
 
+
+@router.get(
+    "/{org_id}/members",
+    response_model=list[MembershipRead]
+)
+async def list_org_members(
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+    org_id: uuid.UUID
+) -> Any:
+    """
+    List all members in the organization.
+    Enforces that the calling user must be a member of the organization.
+    """
+    from sqlalchemy import select
+    from app.organizations.models import Membership
+    statement = select(Membership).where(
+        Membership.organization_id == org_id,
+        Membership.user_id == current_user.id
+    )
+    result = await db.execute(statement)
+    membership = result.scalar_one_or_none()
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not a member of this organization"
+        )
+
+    members = await OrganizationService.list_organization_members(db, org_id)
+    return members
+
+

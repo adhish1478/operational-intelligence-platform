@@ -333,3 +333,50 @@ async def test_active_org_dependency_injection(client: AsyncClient, db_session: 
     response = await client.get("/api/v1/test-org-dep-boundary", headers=valid_headers)
     assert response.status_code == 200
     assert response.json()["slug"] == "dep-test"
+
+
+async def test_list_organization_members(client: AsyncClient, db_session: AsyncSession):
+    """Test listing members of an organization."""
+    user1 = User(email="member1@org.com", password_hash=hash_password("password"))
+    user2 = User(email="member2@org.com", password_hash=hash_password("password"))
+    user3 = User(email="nonmember@org.com", password_hash=hash_password("password"))
+    db_session.add_all([user1, user2, user3])
+    await db_session.commit()
+
+    org = Organization(name="Members List Test", slug="members-list")
+    db_session.add(org)
+    await db_session.flush()
+
+    db_session.add(Membership(user_id=user1.id, organization_id=org.id, role="owner"))
+    db_session.add(Membership(user_id=user2.id, organization_id=org.id, role="member"))
+    await db_session.commit()
+
+    # 1. Login user 1 (member)
+    login_resp = await client.post("/api/v1/auth/login", json={
+        "email": "member1@org.com",
+        "password": "password"
+    })
+    token1 = login_resp.json()["access_token"]
+    headers1 = {"Authorization": f"Bearer {token1}"}
+
+    response = await client.get(f"/api/v1/organizations/{org.id}/members", headers=headers1)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    # Verify both memberships exist in response
+    user_ids = {item["user_id"] for item in data}
+    assert str(user1.id) in user_ids
+    assert str(user2.id) in user_ids
+
+    # 2. Login user 3 (non-member)
+    login_resp = await client.post("/api/v1/auth/login", json={
+        "email": "nonmember@org.com",
+        "password": "password"
+    })
+    token3 = login_resp.json()["access_token"]
+    headers3 = {"Authorization": f"Bearer {token3}"}
+
+    response = await client.get(f"/api/v1/organizations/{org.id}/members", headers=headers3)
+    assert response.status_code == 403
+    assert "not a member" in response.json()["detail"]
+

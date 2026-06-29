@@ -30,8 +30,10 @@ TestSessionLocal = async_sessionmaker(
 async def initialize_db():
     """Ensure database tables exist before running any tests."""
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
+
     # We do not drop tables here in case developer has custom data, 
     # but in fresh CI we could.
 

@@ -92,9 +92,11 @@ The PostgreSQL database requires exactly **five tables** to support the relation
 ### 5.2. Organizations Router (`/api/v1/organizations`)
 *   `POST /` — Creates a new Organization (creator is registered as `owner`).
 *   `GET /` — Lists all organizations the authenticated user belongs to.
+*   `GET /{org_id}/members` — Lists all members inside the organization.
 *   `POST /{org_id}/members` — Invites/adds a member to the organization.
 *   `PATCH /{org_id}/members/{user_id}` — Updates member role.
 *   `DELETE /{org_id}/members/{user_id}` — Removes a member from the organization.
+
 
 ### 5.3. Investigations Router (`/api/v1/investigations`)
 *   `GET /` — Lists active investigations (filtered by active tenant ID provided in `X-Organization-ID` header).

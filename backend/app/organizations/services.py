@@ -146,3 +146,14 @@ class OrganizationService:
         await db.delete(membership)
         await db.commit()
 
+    @staticmethod
+    async def list_organization_members(db: AsyncSession, org_id: uuid.UUID) -> Sequence[Membership]:
+        """
+        List all memberships for a specific organization workspace.
+        """
+        from sqlalchemy import select
+        statement = select(Membership).where(Membership.organization_id == org_id)
+        result = await db.execute(statement)
+        return result.scalars().all()
+
+
