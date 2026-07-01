@@ -8,7 +8,7 @@ This document is the **single source of truth** for all backend development. It 
 
 *   **Phase 0 - Foundation:** 100%
 *   **Phase 1 - Organizations & Multi-Tenancy:** 100%
-*   **Phase 2 - Investigations:** 0%
+*   **Phase 2 - Investigations:** 100%
 *   **Phase 3 - Evidence:** 0%
 *   **Phase 4 - Integrations:** 0%
 *   **Phase 5 - Webhook Ingestion:** 0%
@@ -56,18 +56,18 @@ This document is the **single source of truth** for all backend development. It 
 
 ---
 
-## Phase 2 - Investigations (0%)
+## Phase 2 - Investigations (100%)
 
 *   **Goal:** Build the CRUD functionality for managing active incident containers (Investigations) displayed on the Attention Deck.
 *   **Why it exists:** Investigations are the primary workflow entities. Users need APIs to search, list, assign, and transition incident states.
 *   **Dependencies:** Phase 1
 *   **Checklist:**
-    *   [ ] Design `Investigation` database model (`id`, `organization_id`, `title`, `description`, `severity`, `status`, `assigned_to_id`, `suggested_action`, `detected_at`).
-    *   [ ] Write Alembic migration creating the investigations table with foreign keys referencing users and organizations.
-    *   [ ] Create Pydantic schemas for payload validation and API output representation.
-    *   [ ] Implement API routes for `/api/v1/investigations` (list queue, get by ID, create manually, update status/assignee).
-    *   [ ] Enforce tenant boundary checks: users can only fetch investigations belonging to their active organization.
-    *   [ ] Write integration tests for investigation creation, status transition, and tenant boundary enforcement.
+    *   [x] Design `Investigation` database model (`id`, `organization_id`, `title`, `description`, `severity`, `status`, `assigned_to_id`, `suggested_action`, `detected_at`).
+    *   [x] Write Alembic migration creating the investigations table with foreign keys referencing users and organizations.
+    *   [x] Create Pydantic schemas for payload validation and API output representation.
+    *   [x] Implement API routes for `/api/v1/investigations` (list queue, get by ID, create manually, update status/assignee).
+    *   [x] Enforce tenant boundary checks: users can only fetch investigations belonging to their active organization.
+    *   [x] Write integration tests for investigation creation, status transition, and tenant boundary enforcement.
 
 ---
 
