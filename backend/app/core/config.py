@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "securepassword"
     POSTGRES_DB: str = "oip_db"
 
+    MONGODB_URL: str = "mongodb://localhost:27017"
+    MONGODB_DB: str = "oip_mongo"
+
+
     @computed_field
     @property
     def sync_database_url(self) -> str:
