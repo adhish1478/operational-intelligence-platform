@@ -41,5 +41,15 @@ services:
       db:
         condition: service_healthy
 
+  mongodb:
+    image: mongo:7.0-jammy
+    container_name: oip_mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
 volumes:
   postgres_data:
+  mongodb_data:
+

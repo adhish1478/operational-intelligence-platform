@@ -3,9 +3,11 @@ import jwt
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.config import settings
 from app.core.security import decode_token
 from app.db.session import get_db
+from app.db.mongo import get_mongo_db
 from app.auth.models import User
 from app.auth.services import AuthService
 from app.organizations.models import Organization
@@ -17,7 +19,9 @@ reusable_oauth2 = OAuth2PasswordBearer(
 
 # Common Type Aliases for injection clarity
 DBSessionDep = Annotated[AsyncSession, Depends(get_db)]
+MongoSessionDep = Annotated[AsyncIOMotorDatabase, Depends(get_mongo_db)]
 TokenDep = Annotated[str, Depends(reusable_oauth2)]
+
 
 
 async def get_current_user(db: DBSessionDep, token: TokenDep) -> User:

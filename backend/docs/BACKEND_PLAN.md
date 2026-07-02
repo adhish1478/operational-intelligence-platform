@@ -9,7 +9,7 @@ This document is the **single source of truth** for all backend development. It 
 *   **Phase 0 - Foundation:** 100%
 *   **Phase 1 - Organizations & Multi-Tenancy:** 100%
 *   **Phase 2 - Investigations:** 100%
-*   **Phase 3 - Evidence:** 0%
+*   **Phase 3 - Evidence:** 100%
 *   **Phase 4 - Integrations:** 0%
 *   **Phase 5 - Webhook Ingestion:** 0%
 *   **Phase 6 - Diagnosis Engine:** 0%
@@ -71,17 +71,17 @@ This document is the **single source of truth** for all backend development. It 
 
 ---
 
-## Phase 3 - Evidence (0%)
+## Phase 3 - Evidence (100%)
 
 *   **Goal:** Create database models and APIs allowing users to link external resources (Slack transcripts, Git diffs, Jira links) to active investigations.
 *   **Why it exists:** Investigations require diagnostic context. Users must be able to view a chronological feed of evidence.
 *   **Dependencies:** Phase 2
 *   **Checklist:**
-    *   [ ] Design `Evidence` database model (`id`, `investigation_id`, `type`, `summary`, `author_name`, `source_url`, `metadata` [using PostgreSQL `JSONB` for unstructured payloads], `created_at`).
-    *   [ ] Write Alembic migration creating the evidence table linked to investigations.
-    *   [ ] Create Pydantic schemas for reading and manual creation of evidence.
-    *   [ ] Implement endpoint routes: `POST /api/v1/investigations/{id}/evidence` (append evidence) and `GET /api/v1/investigations/{id}/evidence` (retrieve chronological evidence feed).
-    *   [ ] Add integration test coverage validating evidence attachment and verification.
+    *   [x] Design `Evidence` database model (`id`, `investigation_id`, `type`, `summary`, `author_name`, `source_url`, `metadata` [using MongoDB for unstructured payloads], `created_at`).
+    *   [x] Establish MongoDB connection client and integration config dependencies.
+    *   [x] Create Pydantic schemas for reading and manual creation of evidence.
+    *   [x] Implement endpoint routes: `POST /api/v1/investigations/{id}/evidence` (append evidence) and `GET /api/v1/investigations/{id}/evidence` (retrieve chronological evidence feed).
+    *   [x] Add integration test coverage validating evidence attachment, MongoDB session lifecycle, and tenant boundary verification.
 
 ---
 
