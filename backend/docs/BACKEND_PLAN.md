@@ -11,7 +11,7 @@ This document is the **single source of truth** for all backend development. It 
 *   **Phase 2 - Investigations:** 100%
 *   **Phase 3 - Evidence:** 100%
 *   **Phase 4 - Integrations:** 100%
-*   **Phase 5 - Webhook Ingestion:** 0%
+*   **Phase 5 - Webhook Ingestion:** 100%
 *   **Phase 6 - Diagnosis Engine:** 0%
 *   **Phase 7 - Reporting:** 0%
 *   **Phase 8 - Production Readiness:** 0%
@@ -99,16 +99,16 @@ This document is the **single source of truth** for all backend development. It 
 
 ---
 
-## Phase 5 - Webhook Ingestion (0%)
+## Phase 5 - Webhook Ingestion (100%)
 
-*   **Goal:** Create public API endpoints capable of receiving alert/commit payloads from Slack, Jira, and GitHub webhooks.
+*   **Goal:** Create public API endpoints capable of receiving alert/commit payloads from Slack, Jira, GitHub, and Gmail webhooks.
 *   **Why it exists:** Webhooks push raw incident contexts into the system automatically. The backend needs to listen to external events and match them to investigations.
 *   **Dependencies:** Phase 4
 *   **Checklist:**
-    *   [ ] Implement public route `/api/v1/ingest/{integration_id}` accepting dynamic JSON payloads.
-    *   [ ] Write correlation logic: inspect payload for markers (e.g., email, project name, customer tag) to find active investigations.
-    *   [ ] Correlation Logic: If a match is found, append the payload directly as new `Evidence`. If there is a mismatch or no active investigation, create a new `Investigation` and link it.
-    *   [ ] Add tests simulating Slack webhook alerts, verifying they create/update investigations correctly.
+    *   [x] Implement public route `/api/v1/ingest/{integration_id}` accepting dynamic JSON payloads.
+    *   [x] Write correlation logic: inspect payload for markers (e.g., keywords) to find active investigations.
+    *   [x] Correlation Logic: If a match is found, append the payload directly as new `Evidence`. If there is a mismatch or no active investigation, create a new `Investigation` and link it.
+    *   [x] Add tests simulating Slack webhook alerts, verifying they create/update investigations correctly.
 
 ---
 
