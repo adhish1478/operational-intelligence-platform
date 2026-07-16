@@ -183,3 +183,35 @@ async def test_webhook_ingest_not_found(client: AsyncClient):
     )
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+async def test_webhook_ingest_slack_challenge(client: AsyncClient, db_session: AsyncSession):
+    # Setup Tenant User, Org, and Integration
+    user = User(email="slack@tenant.com", password_hash=hash_password("password"))
+    db_session.add(user)
+    await db_session.commit()
+
+    org = Organization(name="Slack Org", slug="slack-org")
+    db_session.add(org)
+    await db_session.flush()
+
+    db_session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+    await db_session.commit()
+
+    integration = Integration(
+        organization_id=org.id,
+        platform="slack",
+        credentials_encrypted="some-secrets",
+        status="active"
+    )
+    db_session.add(integration)
+    await db_session.commit()
+
+    # POST slack URL verification payload
+    response = await client.post(
+        f"/api/v1/ingest/{integration.id}",
+        json={"type": "url_verification", "challenge": "slack-test-challenge-123"}
+    )
+    assert response.status_code == 200
+    assert response.json()["challenge"] == "slack-test-challenge-123"
+

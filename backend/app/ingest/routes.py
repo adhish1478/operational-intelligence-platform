@@ -17,6 +17,10 @@ async def receive_webhook_payload(
     """
     Public webhook receiver endpoint. Processes and correlates raw events to investigations.
     """
+    # Slack URL Verification Challenge handler
+    if payload.get("type") == "url_verification":
+        return {"challenge": payload.get("challenge")}
+
     # 1. Fetch integration by ID
     integration = await IntegrationService.get_integration_by_id(db, integration_id)
     if not integration:
