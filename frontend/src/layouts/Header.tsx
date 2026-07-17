@@ -2,10 +2,16 @@ import React from 'react';
 import { Bell, Search, Plus, ChevronRight } from 'lucide-react';
 import { useLocation, Link } from 'react-router-dom';
 import { useUIStore } from '../store/uiStore';
+import { useAuthStore } from '../store/authStore';
 
 export const Header: React.FC = () => {
     const location = useLocation();
     const openCommandPalette = useUIStore((state) => state.openCommandPalette);
+    const { user, activeOrgId } = useAuthStore();
+
+    // Find active organization details
+    const activeOrg = user?.organizations?.find(o => o.id === activeOrgId);
+    const orgName = activeOrg ? activeOrg.name : 'Global Ops';
 
     // Generate dynamic breadcrumbs from path
     const pathnames = location.pathname.split('/').filter((x) => x);
@@ -26,7 +32,7 @@ export const Header: React.FC = () => {
             {/* Contextual Breadcrumbs */}
             <div className="flex items-center gap-1.5 text-body-sm">
                 <Link to="/dashboard" className="text-on-surface-variant hover:text-on-surface transition-colors">
-                    Global Ops
+                    {orgName}
                 </Link>
                 {breadcrumbItems.length > 0 && <ChevronRight className="w-3.5 h-3.5 text-outline" />}
                 {breadcrumbItems.map((item, index) => (
