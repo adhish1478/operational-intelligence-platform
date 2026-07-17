@@ -1,5 +1,6 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { DashboardLayout } from './layouts/DashboardLayout';
+import { LandingPage } from './pages/LandingPage';
 import { Dashboard } from './pages/Dashboard';
 import { InvestigationsQueue } from './pages/InvestigationsQueue';
 import { InvestigationDetails } from './pages/InvestigationDetails';
@@ -7,6 +8,7 @@ import { EntityDetails } from './pages/EntityDetails';
 import { Integrations } from './pages/Integrations';
 import { Reports } from './pages/Reports';
 import { Settings } from './pages/Settings';
+import { AuthGuard } from './components/AuthGuard';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const queryClient = new QueryClient();
@@ -16,64 +18,78 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <Router>
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<LandingPage />} />
           <Route
             path="/dashboard"
             element={
-              <DashboardLayout>
-                <Dashboard />
-              </DashboardLayout>
+              <AuthGuard>
+                <DashboardLayout>
+                  <Dashboard />
+                </DashboardLayout>
+              </AuthGuard>
             }
           />
           <Route
             path="/investigations"
             element={
-              <DashboardLayout>
-                <InvestigationsQueue />
-              </DashboardLayout>
+              <AuthGuard>
+                <DashboardLayout>
+                  <InvestigationsQueue />
+                </DashboardLayout>
+              </AuthGuard>
             }
           />
           <Route
             path="/investigations/:id"
             element={
-              <DashboardLayout>
-                <InvestigationDetails />
-              </DashboardLayout>
+              <AuthGuard>
+                <DashboardLayout>
+                  <InvestigationDetails />
+                </DashboardLayout>
+              </AuthGuard>
             }
           />
           <Route
             path="/entities/:type/:id"
             element={
-              <DashboardLayout>
-                <EntityDetails />
-              </DashboardLayout>
+              <AuthGuard>
+                <DashboardLayout>
+                  <EntityDetails />
+                </DashboardLayout>
+              </AuthGuard>
             }
           />
           <Route
             path="/integrations"
             element={
-              <DashboardLayout>
-                <Integrations />
-              </DashboardLayout>
+              <AuthGuard>
+                <DashboardLayout>
+                  <Integrations />
+                </DashboardLayout>
+              </AuthGuard>
             }
           />
           <Route
             path="/reports"
             element={
-              <DashboardLayout>
-                <Reports />
-              </DashboardLayout>
+              <AuthGuard>
+                <DashboardLayout>
+                  <Reports />
+                </DashboardLayout>
+              </AuthGuard>
             }
           />
           <Route
             path="/settings"
             element={
-              <DashboardLayout>
-                <Settings />
-              </DashboardLayout>
+              <AuthGuard>
+                <DashboardLayout>
+                  <Settings />
+                </DashboardLayout>
+              </AuthGuard>
             }
           />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<LandingPage />} />
         </Routes>
       </Router>
     </QueryClientProvider>
@@ -81,3 +97,4 @@ function App() {
 }
 
 export default App;
+
