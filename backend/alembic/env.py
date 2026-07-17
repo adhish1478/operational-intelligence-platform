@@ -10,8 +10,9 @@ from app.db.base import Base
 # Ensure all models are imported here so that metadata is updated before migrations run
 from app.auth.models import User  # noqa
 from app.organizations.models import Organization, Membership  # noqa
-from app.investigations.models import Investigation # noqa
+from app.investigations.models import Investigation, Diagnosis # noqa
 from app.integrations.models import Integration # noqa
+
 
 
 # this is the Alembic Config object, which provides access to the values within the .ini file

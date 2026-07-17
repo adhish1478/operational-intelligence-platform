@@ -30,3 +30,16 @@ class InvestigationRead(InvestigationBase):
     model_config = {
         'from_attributes': True
     }
+
+
+class DiagnosisRead(BaseModel):
+    id: uuid.UUID
+    investigation_id: uuid.UUID
+    triggered_by_id: uuid.UUID | None
+    report_summary: str
+    created_at: datetime
+
+    model_config = {
+        'from_attributes': True
+    }
+
