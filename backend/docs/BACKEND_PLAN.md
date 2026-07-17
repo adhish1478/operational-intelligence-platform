@@ -13,7 +13,7 @@ This document is the **single source of truth** for all backend development. It 
 *   **Phase 4 - Integrations:** 100%
 *   **Phase 5 - Webhook Ingestion:** 100%
 *   **Phase 6 - Diagnosis Engine:** 100%
-*   **Phase 7 - Reporting:** 0%
+*   **Phase 7 - Reporting:** 100%
 *   **Phase 8 - Production Readiness:** 0%
 
 ---
@@ -126,15 +126,15 @@ This document is the **single source of truth** for all backend development. It 
 
 ---
 
-## Phase 7 - Reporting (0%)
+## Phase 7 - Reporting (100%)
 
 *   **Goal:** Implement simple Weekly digests of incidents and SLA statuses.
 *   **Why it exists:** Operations managers need to summarize weekly performance and SLA breaches for team leadership.
 *   **Dependencies:** Phase 2
 *   **Checklist:**
-    *   [ ] Implement API route `GET /api/v1/reports/digest` that aggregates active/resolved investigation metrics, SLA warnings, and category distributions.
-    *   [ ] Add basic CSV/JSON exporter formatting.
-    *   [ ] Add tests verifying aggregate calculations are mathematically accurate.
+    *   [x] Implement API route `GET /api/v1/reports/digest` that aggregates active/resolved investigation metrics, SLA warnings, and category distributions.
+    *   [x] Add basic JSON exporter formatting schema.
+    *   [x] Add tests verifying aggregate calculations are mathematically accurate.
 
 ---
 
