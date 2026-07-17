@@ -167,7 +167,7 @@ async def test_refresh_token_rotation(client: AsyncClient, db_session: AsyncSess
 
 
 async def test_logout_success(client: AsyncClient, db_session: AsyncSession):
-    """Test logout clears the refresh token cookie."""
+    """Test logout invalidates the access token and clears the refresh token cookie."""
     user = User(
         email="testlogout@example.com",
         password_hash=hash_password("password123")
@@ -176,15 +176,26 @@ async def test_logout_success(client: AsyncClient, db_session: AsyncSession):
     await db_session.commit()
 
     # Login
-    await client.post("/api/v1/auth/login", json={
+    login_resp = await client.post("/api/v1/auth/login", json={
         "email": "testlogout@example.com",
         "password": "password123"
     })
+    token = login_resp.json()["access_token"]
     assert "refresh_token" in client.cookies
 
-    # Logout
-    response = await client.post("/api/v1/auth/logout")
+    # Verify token works on /me
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.get("/api/v1/auth/me", headers=headers)
+    assert response.status_code == 200
+
+    # Logout (passing auth header now)
+    response = await client.post("/api/v1/auth/logout", headers=headers)
     assert response.status_code == 200
     
     # Assert refresh token cookie is removed/expired from client jar
     assert "refresh_token" not in client.cookies
+
+    # Assert access token is now blocklisted and rejects access
+    response = await client.get("/api/v1/auth/me", headers=headers)
+    assert response.status_code == 401
+

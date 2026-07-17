@@ -44,7 +44,7 @@ class Diagnosis(Base):
         ForeignKey("investigations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     triggered_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=False
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     report_summary: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

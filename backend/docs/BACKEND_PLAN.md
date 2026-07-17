@@ -14,7 +14,7 @@ This document is the **single source of truth** for all backend development. It 
 *   **Phase 5 - Webhook Ingestion:** 100%
 *   **Phase 6 - Diagnosis Engine:** 100%
 *   **Phase 7 - Reporting:** 100%
-*   **Phase 8 - Production Readiness:** 0%
+*   **Phase 8 - Production Readiness:** 100%
 
 ---
 
@@ -138,14 +138,14 @@ This document is the **single source of truth** for all backend development. It 
 
 ---
 
-## Phase 8 - Production Readiness (0%)
+## Phase 8 - Production Readiness (100%)
 
 *   **Goal:** Harden security, prepare credentials storage, optimize database, and run system validation checks.
 *   **Why it exists:** Transitioning from local development to production hosting requires securing credentials and optimizing databases.
 *   **Dependencies:** Phase 7
 *   **Checklist:**
-    *   [ ] Add a Redis or in-memory blocklist check inside `get_current_user` to invalidate access tokens on logout.
-    *   [ ] Refactor settings to support secret injection from environments/vaults.
-    *   [ ] Review database indexes on the `users`, `organizations`, `investigations`, and `evidence` tables.
-    *   [ ] Run backend security checks via linting and safety scans.
-    *   [ ] Execute the final system test suite to verify end-to-end functionality.
+    *   [x] Add a Redis or in-memory blocklist check inside `get_current_user` to invalidate access tokens on logout.
+    *   [x] Refactor settings to support secret injection from environments/vaults (handled via python-dotenv BaseSettings).
+    *   [x] Review database indexes on the `users`, `organizations`, `investigations`, and `evidence` tables (added triggered_by_id index).
+    *   [x] Run backend security checks via linting and safety scans.
+    *   [x] Execute the final system test suite to verify end-to-end functionality.

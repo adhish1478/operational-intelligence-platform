@@ -30,11 +30,17 @@ async def get_current_user(db: DBSessionDep, token: TokenDep) -> User:
     Returns the User database object if signature is valid, token is unexpired,
     and user exists/is active.
     """
+    from app.auth.blocklist import is_token_blocklisted
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
+    if is_token_blocklisted(token):
+        raise credentials_exception
+
     
     try:
         payload = decode_token(token)
