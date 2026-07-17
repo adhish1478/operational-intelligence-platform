@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     SECRET_KEY: str
+    OPENAI_API_KEY: str | None = None
+
 
     # Token Lifespans
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15

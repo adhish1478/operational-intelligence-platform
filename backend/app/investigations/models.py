@@ -34,3 +34,22 @@ class Investigation(Base):
     # Note: we import models locally or dynamically using strings to prevent circular imports
     organization= relationship("Organization")
     assigned_to = relationship('User')
+
+
+class Diagnosis(Base):
+    __tablename__ = "diagnoses"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4, index=True)
+    investigation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("investigations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    triggered_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=False
+    )
+    report_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    investigation = relationship("Investigation")
+    triggered_by = relationship("User")

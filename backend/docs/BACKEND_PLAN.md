@@ -12,7 +12,7 @@ This document is the **single source of truth** for all backend development. It 
 *   **Phase 3 - Evidence:** 100%
 *   **Phase 4 - Integrations:** 100%
 *   **Phase 5 - Webhook Ingestion:** 100%
-*   **Phase 6 - Diagnosis Engine:** 0%
+*   **Phase 6 - Diagnosis Engine:** 100%
 *   **Phase 7 - Reporting:** 0%
 *   **Phase 8 - Production Readiness:** 0%
 
@@ -112,17 +112,17 @@ This document is the **single source of truth** for all backend development. It 
 
 ---
 
-## Phase 6 - Diagnosis Engine (0%)
+## Phase 6 - Diagnosis Engine (100%)
 
 *   **Goal:** Build a manual "Run Diagnosis" helper utilizing a simple LLM prompt template to analyze evidence.
 *   **Why it exists:** Replaces complex agent graphs with a highly reliable, single-prompt diagnostic summary.
 *   **Dependencies:** Phase 3
 *   **Checklist:**
-    *   [ ] Setup basic integration client with a popular LLM provider (e.g., OpenAI or Anthropic SDK).
-    *   [ ] Design `Diagnosis` database model (`id`, `investigation_id`, `triggered_by_id`, `report_summary`, `created_at`).
-    *   [ ] Write Alembic migration to create the diagnoses table.
-    *   [ ] Create route `POST /api/v1/investigations/{id}/diagnose` that pulls all linked evidence, constructs a single system prompt, calls the LLM, saves the result, and updates the investigation's `suggested_action`.
-    *   [ ] Add test suite mocking LLM API calls, verifying reports are compiled and saved.
+    *   [x] Setup basic integration client with a popular LLM provider (e.g., OpenAI or Anthropic SDK).
+    *   [x] Design `Diagnosis` database model (`id`, `investigation_id`, `triggered_by_id`, `report_summary`, `created_at`).
+    *   [x] Write Alembic migration to create the diagnoses table.
+    *   [x] Create route `POST /api/v1/investigations/{id}/diagnose` that pulls all linked evidence, constructs a single system prompt, calls the LLM, saves the result, and updates the investigation's `suggested_action`.
+    *   [x] Add test suite mocking LLM API calls, verifying reports are compiled and saved.
 
 ---
 
