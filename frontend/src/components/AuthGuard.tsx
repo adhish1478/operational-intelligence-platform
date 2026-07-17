@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
 interface AuthGuardProps {
@@ -7,11 +7,17 @@ interface AuthGuardProps {
 }
 
 export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
-  const token = useAuthStore((state) => state.token);
+  const { token, activeOrgId } = useAuthStore();
+  const location = useLocation();
 
   if (!token) {
     // Redirect unauthenticated users back to the landing page
     return <Navigate to="/" replace />;
+  }
+
+  // Redirect users who haven't completed onboarding to the /onboarding page
+  if (!activeOrgId && location.pathname !== '/onboarding') {
+    return <Navigate to="/onboarding" replace />;
   }
 
   return <>{children}</>;
