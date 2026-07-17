@@ -1,7 +1,8 @@
 from datetime import timedelta
 import jwt
 from fastapi import APIRouter, Response, Request, status, HTTPException
-from app.api.deps import DBSessionDep, CurrentUserDep
+from app.api.deps import DBSessionDep, CurrentUserDep, TokenDep
+
 from app.auth.schemas import UserCreate, UserRead, Token, UserLogin
 from app.auth.services import AuthService
 from app.core.security import create_token, decode_token
@@ -150,10 +151,15 @@ async def get_current_profile(current_user: CurrentUserDep) -> UserRead:
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
-async def logout(response: Response) -> dict[str, str]:
+async def logout(
+    response: Response,
+    token: TokenDep
+) -> dict[str, str]:
     """
-    Invalidate client authorization by clearing the Refresh Token cookie.
+    Invalidate client authorization by blocklisting the Access Token and clearing the Refresh Token cookie.
     """
+    from app.auth.blocklist import blocklist_token
+    blocklist_token(token)
     response.delete_cookie(
         key="refresh_token",
         httponly=True,
@@ -161,3 +167,4 @@ async def logout(response: Response) -> dict[str, str]:
         secure=settings.ENVIRONMENT == "production",
     )
     return {"message": "Logged out successfully"}
+
