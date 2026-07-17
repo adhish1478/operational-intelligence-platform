@@ -8,6 +8,7 @@ import { EntityDetails } from './pages/EntityDetails';
 import { Integrations } from './pages/Integrations';
 import { Reports } from './pages/Reports';
 import { Settings } from './pages/Settings';
+import { Onboarding } from './pages/Onboarding';
 import { AuthGuard } from './components/AuthGuard';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -19,6 +20,14 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<LandingPage />} />
+          <Route
+            path="/onboarding"
+            element={
+              <AuthGuard>
+                <Onboarding />
+              </AuthGuard>
+            }
+          />
           <Route
             path="/dashboard"
             element={

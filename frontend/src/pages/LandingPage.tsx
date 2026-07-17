@@ -90,13 +90,16 @@ export const LandingPage: React.FC = () => {
       const orgs = await orgsResp.json();
 
       if (orgs.length === 0) {
-        throw new Error('You do not belong to any tenant organization.');
+        // Save details with empty activeOrgId and redirect to onboarding wizard
+        setAuth(access_token, userProfile, '');
+        setIsModalOpen(false);
+        navigate('/onboarding');
+      } else {
+        // Save details and redirect to dashboard
+        setAuth(access_token, userProfile, orgs[0].id);
+        setIsModalOpen(false);
+        navigate('/dashboard');
       }
-
-      // 4. Save to global state and redirect
-      setAuth(access_token, userProfile, orgs[0].id);
-      setIsModalOpen(false);
-      navigate('/dashboard');
 
     } catch (err: any) {
       setError(err.message || 'An error occurred during authentication.');

@@ -19,7 +19,9 @@ async function request(path: string, options: RequestInit = {}) {
   }
 
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  const response = await fetch(`${BASE_URL}${cleanPath}`, {
+  // Automatically prepend versioned API prefix to match FastAPI mounts
+  const apiPath = cleanPath.startsWith('/api/v1/') ? cleanPath : `/api/v1${cleanPath}`;
+  const response = await fetch(`${BASE_URL}${apiPath}`, {
     ...options,
     headers,
   });

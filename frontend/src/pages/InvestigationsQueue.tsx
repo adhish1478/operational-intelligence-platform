@@ -1,13 +1,22 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, ArrowUpRight } from 'lucide-react';
-import { mockInvestigations } from '../services/mockData';
-import type { Severity, InvestigationStatus } from '../types';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { mapInvestigation } from '../lib/mappers';
+import type { Severity, InvestigationStatus, OperationalInvestigation, EntityReference } from '../types';
 
 export const InvestigationsQueue: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  const { data: rawInvs, isLoading } = useQuery({
+    queryKey: ['investigations'],
+    queryFn: () => api.get('/investigations/')
+  });
+
+  const investigations: OperationalInvestigation[] = (rawInvs || []).map(mapInvestigation);
 
   const getSeverityBadgeClass = (severity: Severity) => {
     switch (severity) {
@@ -28,7 +37,7 @@ export const InvestigationsQueue: React.FC = () => {
   };
 
   // Filter investigations
-  const filteredInvestigations = mockInvestigations.filter((inv) => {
+  const filteredInvestigations = investigations.filter((inv: OperationalInvestigation) => {
     const matchesSearch = inv.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           inv.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           inv.id.toLowerCase().includes(searchQuery.toLowerCase());
@@ -36,6 +45,14 @@ export const InvestigationsQueue: React.FC = () => {
     const matchesStatus = statusFilter === 'all' || inv.status === statusFilter;
     return matchesSearch && matchesSeverity && matchesStatus;
   });
+
+  if (isLoading) {
+    return (
+      <div className="max-w-6xl mx-auto py-24 text-center font-mono text-xs text-on-surface-variant animate-pulse">
+        Loading investigations...
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -53,19 +70,19 @@ export const InvestigationsQueue: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-error animate-pulse" />
             <span className="text-on-surface font-semibold">
-              {mockInvestigations.filter(i => i.status === 'open').length} Open
+              {investigations.filter((i: OperationalInvestigation) => i.status === 'open').length} Open
             </span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-warning" />
             <span className="text-on-surface font-semibold">
-              {mockInvestigations.filter(i => i.status === 'investigating').length} Triaging
+              {investigations.filter((i: OperationalInvestigation) => i.status === 'investigating').length} Triaging
             </span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-success" />
             <span className="text-on-surface font-semibold">
-              {mockInvestigations.filter(i => i.status === 'resolved').length} Resolved
+              {investigations.filter((i: OperationalInvestigation) => i.status === 'resolved').length} Resolved
             </span>
           </div>
         </div>
@@ -141,7 +158,7 @@ export const InvestigationsQueue: React.FC = () => {
                 </td>
               </tr>
             ) : (
-              filteredInvestigations.map((inv) => (
+              filteredInvestigations.map((inv: OperationalInvestigation) => (
                 <tr 
                   key={inv.id} 
                   className="border-b border-outline-variant/60 hover:bg-surface-low transition-colors align-middle text-body-sm text-on-surface group"
@@ -166,7 +183,7 @@ export const InvestigationsQueue: React.FC = () => {
                   {/* Entities references */}
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
-                      {inv.entities.map(ent => (
+                      {inv.entities.map((ent: EntityReference) => (
                         <Link 
                           key={ent.id}
                           to={`/entities/${ent.type}/${ent.id}`}
