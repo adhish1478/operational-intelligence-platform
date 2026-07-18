@@ -4,6 +4,7 @@ from app.organizations.routes import router as org_router
 from app.investigations.routes import router as inv_router
 from app.evidence.routes import router as evidence_router
 from app.integrations.routes import router as integrations_router
+from app.integrations.github import router as github_oauth_router
 from app.ingest.routes import router as ingest_router
 from app.reports.routes import router as reports_router
 
@@ -15,6 +16,7 @@ api_router.include_router(org_router)
 api_router.include_router(inv_router)
 api_router.include_router(evidence_router)
 api_router.include_router(integrations_router)
+api_router.include_router(github_oauth_router, prefix="/integrations")
 api_router.include_router(ingest_router)
 api_router.include_router(reports_router)
 

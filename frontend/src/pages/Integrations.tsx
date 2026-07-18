@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RefreshCw, ShieldAlert } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -29,6 +29,17 @@ export const Integrations: React.FC = () => {
 
   const configuredList = rawConfigs || [];
 
+  // Listen for OAuth completion messages from popup windows
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OIP_INTEGRATION_CONNECTED' && event.data?.platform === 'github') {
+        refetch();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [refetch]);
+
   const handleToggle = async (platform: string, connectedId?: string) => {
     setMutatingId(platform);
     setError(null);
@@ -36,15 +47,33 @@ export const Integrations: React.FC = () => {
       if (connectedId) {
         // Disconnect integration
         await api.delete(`/integrations/${connectedId}`);
+        await refetch();
+      } else if (platform === 'github') {
+        // Open the authorization endpoint inside a centered popup window
+        const token = localStorage.getItem('token') || '';
+        const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+        const authUrl = `${BASE_URL}/api/v1/integrations/github/authorize?token=${token}`;
+        
+        const width = 600;
+        const height = 650;
+        const left = window.screenX + (window.outerWidth - width) / 2;
+        const top = window.screenY + (window.outerHeight - height) / 2;
+        
+        window.open(
+          authUrl,
+          'Connect GitHub',
+          `width=${width},height=${height},left=${left},top=${top},status=no,menubar=no,toolbar=no`
+        );
+        return; // Popup opened
       } else {
-        // Connect new integration with default credentials payload
+        // Connect other platforms with dummy credential placeholders for now
         await api.post('/integrations/', {
           platform,
           status: 'active',
           credentials: { api_key: 'dummy-ops-token' }
         });
+        await refetch();
       }
-      await refetch();
     } catch (err: any) {
       setError(err.message || 'Failed to update integration connection.');
     } finally {

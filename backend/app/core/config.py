@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     OPENAI_API_KEY: str | None = None
 
+    # GitHub OAuth Settings
+    GITHUB_CLIENT_ID: str | None = None
+    GITHUB_CLIENT_SECRET: str | None = None
+    GITHUB_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/github/callback"
+
 
     # Token Lifespans
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15

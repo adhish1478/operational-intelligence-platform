@@ -9,11 +9,37 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.db.base import Base
 
-# Create a test engine pointing to the local postgres
-# In standard setups, a separate test database is preferred.
-# Here we connect to the configured DB but run all tests in a transaction that is rolled back.
+# Auto-create the test database if it does not exist yet
+def ensure_test_database_exists():
+    from sqlalchemy import create_engine, text
+    sync_url = settings.sync_database_url
+    parts = sync_url.rsplit("/", 1)
+    admin_url = f"{parts[0]}/postgres"
+    test_db_name = f"{settings.POSTGRES_DB}_test"
+    
+    try:
+        engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :dbname"),
+                {"dbname": test_db_name}
+            )
+            exists = result.scalar() is not None
+            if not exists:
+                conn.execute(text(f"CREATE DATABASE {test_db_name}"))
+        engine.dispose()
+    except Exception as e:
+        print(f"Warning: Could not verify/create test database: {e}")
+
+ensure_test_database_exists()
+
+# Point engine to the isolated test database
+db_url = settings.async_database_url
+parts = db_url.rsplit("/", 1)
+test_db_url = f"{parts[0]}/{settings.POSTGRES_DB}_test"
+
 engine = create_async_engine(
-    settings.async_database_url,
+    test_db_url,
     pool_pre_ping=True
 )
 
