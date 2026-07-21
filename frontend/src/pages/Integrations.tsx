@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, ShieldAlert } from 'lucide-react';
+import { RefreshCw, ShieldAlert, ChevronDown, Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 
@@ -20,6 +20,11 @@ const POTENTIAL_CONNECTORS: PotentialConnector[] = [
 export const Integrations: React.FC = () => {
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // UI Expand state for select drawer
+  const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [savingRepos, setSavingRepos] = useState(false);
 
   // 1. Fetch configured integrations
   const { data: rawConfigs, isLoading, refetch } = useQuery({
@@ -28,6 +33,26 @@ export const Integrations: React.FC = () => {
   });
 
   const configuredList = rawConfigs || [];
+  
+  // Retrieve active GitHub configuration ID if connected
+  const githubConfig = configuredList.find((c: any) => c.platform === 'github');
+  const githubConnectedId = githubConfig?.id;
+
+  // Fetch repositories from backend using active GitHub integration credentials
+  const { data: repoList, isLoading: isLoadingRepos } = useQuery({
+    queryKey: ['github-repos', githubConnectedId],
+    queryFn: () => api.get(`/integrations/github/${githubConnectedId}/repos`),
+    enabled: !!githubConnectedId && expandedPlatform === 'github'
+  });
+
+  // Sync selected checkboxes with loaded database preferences
+  useEffect(() => {
+    if (githubConfig?.tracked_repos) {
+      setSelectedRepos(githubConfig.tracked_repos);
+    } else {
+      setSelectedRepos([]);
+    }
+  }, [githubConfig?.tracked_repos]);
 
   // Listen for OAuth completion messages from popup windows
   useEffect(() => {
@@ -153,6 +178,15 @@ export const Integrations: React.FC = () => {
                   <div className="flex items-center gap-1.5 text-[11px] font-mono text-outline">
                     <RefreshCw className={`w-3.5 h-3.5 ${isPending ? 'animate-spin' : 'animate-spin-slow'}`} />
                     <span>Active Telemetry</span>
+                    {connector.platform === 'github' && (
+                      <button
+                        onClick={() => setExpandedPlatform(expandedPlatform === 'github' ? null : 'github')}
+                        className="ml-1 p-0.5 rounded hover:bg-surface-low text-on-surface-variant hover:text-on-surface transition-colors"
+                        title="Configure tracked repositories"
+                      >
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${expandedPlatform === 'github' ? 'rotate-180' : ''}`} />
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <span className="text-[11px] text-outline italic">Not synchronized</span>
@@ -170,6 +204,88 @@ export const Integrations: React.FC = () => {
                   {isPending ? 'Saving...' : isConnected ? 'Disconnect' : 'Connect'}
                 </button>
               </div>
+
+              {/* Expanded Repo Selection Drawer */}
+              {connector.platform === 'github' && isConnected && expandedPlatform === 'github' && (
+                <div className="mt-2 border-t border-outline-variant/60 pt-4 space-y-3">
+                  <div className="flex flex-col gap-1">
+                    <h4 className="text-[12px] font-bold text-on-surface uppercase tracking-wider">Tracked Repositories</h4>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      Select repositories to scan for pull requests and code modifications.
+                    </p>
+                  </div>
+
+                  {isLoadingRepos ? (
+                    <div className="flex items-center gap-1.5 justify-center py-6 text-[11px] text-outline font-mono">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                      <span>Fetching repositories...</span>
+                    </div>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto border border-outline-variant/80 rounded bg-surface-low p-2 space-y-1.5">
+                      {(!repoList || repoList.length === 0) ? (
+                        <p className="text-[11px] text-on-surface-variant text-center py-4 italic">No repositories found.</p>
+                      ) : (
+                        repoList.map((repo: any) => {
+                          const isChecked = selectedRepos.includes(repo.full_name);
+                          return (
+                            <label 
+                              key={repo.id} 
+                              className="flex items-start gap-2 p-1.5 hover:bg-surface-high rounded cursor-pointer transition-colors text-[11px] text-on-surface"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedRepos([...selectedRepos, repo.full_name]);
+                                  } else {
+                                    setSelectedRepos(selectedRepos.filter(name => name !== repo.full_name));
+                                  }
+                                }}
+                                className="mt-0.5 rounded border-outline-variant text-primary focus:ring-primary h-3.5 w-3.5"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold truncate" title={repo.full_name}>
+                                  {repo.full_name}
+                                </p>
+                                {repo.private && (
+                                  <span className="text-[9px] font-bold text-error uppercase tracking-wider block mt-0.5">Private</span>
+                                )}
+                              </div>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-2 border-t border-outline-variant/40">
+                    <span className="text-[11px] text-outline font-mono">
+                      {selectedRepos.length} selected
+                    </span>
+                    <button
+                      onClick={async () => {
+                        setSavingRepos(true);
+                        try {
+                          await api.post(`/integrations/github/${connectedId}/track`, {
+                            repos: selectedRepos
+                          });
+                          await refetch();
+                          setExpandedPlatform(null);
+                        } catch (err: any) {
+                          setError(err.message || 'Failed to save tracking settings.');
+                        } finally {
+                          setSavingRepos(false);
+                        }
+                      }}
+                      disabled={savingRepos || isLoadingRepos}
+                      className="px-2.5 py-1 bg-primary hover:bg-slate-800 text-white rounded text-[11px] font-bold transition-colors disabled:opacity-50"
+                    >
+                      {savingRepos ? 'Saving...' : 'Save Settings'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
             </div>
           );

@@ -21,3 +21,16 @@ class Integration(Base):
 
     # Relationships
     organization = relationship("Organization")
+
+    @property
+    def tracked_repos(self) -> list[str]:
+        """
+        Decrypts credentials on the fly and retrieves the list of tracked repositories.
+        """
+        from app.core.security import decrypt_credentials
+        try:
+            creds = decrypt_credentials(self.credentials_encrypted)
+            return creds.get("tracked_repos", [])
+        except Exception:
+            return []
+    
