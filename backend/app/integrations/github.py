@@ -1,9 +1,11 @@
+from fastapi.openapi.utils import status_code_ranges
 import uuid
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse, HTMLResponse
 import httpx
 from sqlalchemy import select
+from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.security import decode_token, encrypt_credentials
@@ -140,3 +142,99 @@ async def github_callback(db: DBSessionDep, code: str, state: str):
     </html>
     """
     return HTMLResponse(content=html_content, status_code=200)
+
+
+class TrackReposRequest(BaseModel):
+    repos: list[str]
+
+@router.get("/{integration_id}/repos")
+async def get_github_repos(
+    integration_id: uuid.UUID,
+    db: DBSessionDep
+    ):
+    """
+    Fetches all repositories from GitHub that the active connection token has access to.
+    """
+    # 1. Fetch integration
+    statement = select(Integration).where(Integration.id == integration_id)
+    res= await db.execute(statement)
+    integration = res.scalar_one_or_none()
+
+    if not integration or integration.platform != "github":
+        raise HTTPException(status_code=404, detail="integration config not found")
+
+    # 2. decript creds to extract access token
+    from app.core.security import decrypt_credentials
+    try:
+        creds= decrypt_credentials(integration.credentials_encrypted)
+        access_token = creds.get("access_token")
+    except Exception:
+        raise HTTPException(status_code=500, detail="failed to decrypt credentials")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Integration is not connected or missing")
+    
+    # 3. Query GitHub API for user repositories
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(
+            "https://api.github.com/user/repos?per_page=100&sort=updated",
+            headers={
+                "Authorization": f"token {access_token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "Sigint-AI-Platform"
+            }
+        )
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to fetch repositories from GitHub: {response.text}"
+        )
+    
+    repos = response.json()
+
+    # Return formatted list of repository details safely
+    return [
+        {
+            "id": repo.get("id"),
+            "full_name": repo.get("full_name"),
+            "private": repo.get("private"),
+            "default_branch": repo.get("default_branch"),
+            "description": repo.get("description"),
+            "language": repo.get("language"),
+            "pushed_at": repo.get("pushed_at")
+        }
+        for repo in repos
+    ]
+
+@router.post("/{integration_id}/track")
+async def update_tracked_repositories(
+    integration_id: uuid.UUID,
+    payload: TrackReposRequest,
+    db: DBSessionDep
+):
+    """
+    Saves the list of selected repository slugs to the integration's configuration.
+    """
+    # 1. Fetch integration
+    statement = select(Integration).where(Integration.id == integration_id)
+    res = await db.execute(statement)
+    integration = res.scalar_one_or_none()
+    
+    if not integration or integration.platform != "github":
+        raise HTTPException(status_code=404, detail="Integration configuration not found")
+        
+    # 2. Decrypt existing credentials dictionary
+    from app.core.security import decrypt_credentials, encrypt_credentials
+    try:
+        creds = decrypt_credentials(integration.credentials_encrypted)
+    except Exception:
+        creds = {}
+        
+    # 3. Update the tracked_repos list
+    creds["tracked_repos"] = payload.repos
+    
+    # 4. Re-encrypt and commit changes to database
+    integration.credentials_encrypted = encrypt_credentials(creds)
+    db.add(integration)
+    await db.commit()
+    
+    return {"status": "success", "tracked_repos": payload.repos}

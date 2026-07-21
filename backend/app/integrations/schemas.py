@@ -19,6 +19,7 @@ class IntegrationRead(IntegrationBase):
     organization_id: uuid.UUID
     last_synced_at: datetime | None
     created_at: datetime
+    tracked_repos: list[str] = []
 
     model_config = {
         "from_attributes": True
