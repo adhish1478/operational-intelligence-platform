@@ -222,19 +222,13 @@ async def update_tracked_repositories(
     if not integration or integration.platform != "github":
         raise HTTPException(status_code=404, detail="Integration configuration not found")
         
-    # 2. Decrypt existing credentials dictionary
-    from app.core.security import decrypt_credentials, encrypt_credentials
-    try:
-        creds = decrypt_credentials(integration.credentials_encrypted)
-    except Exception:
-        creds = {}
-        
-    # 3. Update the tracked_repos list
-    creds["tracked_repos"] = payload.repos
+    # 2. Update the config JSONB column directly
+    new_config = dict(integration.config or {})
+    new_config["tracked_repos"] = payload.repos
     
-    # 4. Re-encrypt and commit changes to database
-    integration.credentials_encrypted = encrypt_credentials(creds)
+    # 3. Save and commit changes
+    integration.config = new_config
     db.add(integration)
     await db.commit()
     
-    return {"status": "success", "tracked_repos": payload.repos}
+    return {"status": "success", "config": new_config}

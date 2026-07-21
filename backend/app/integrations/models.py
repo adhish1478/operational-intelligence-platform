@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from sqlalchemy import String, ForeignKey, DateTime, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
@@ -13,6 +14,7 @@ class Integration(Base):
     )
     platform: Mapped[str] = mapped_column(String(50), nullable=False)  # slack, github, jira, gmail
     credentials_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default='{}')
     status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)  # active, error, disconnected
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

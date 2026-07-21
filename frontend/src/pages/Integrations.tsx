@@ -47,12 +47,12 @@ export const Integrations: React.FC = () => {
 
   // Sync selected checkboxes with loaded database preferences
   useEffect(() => {
-    if (githubConfig?.tracked_repos) {
-      setSelectedRepos(githubConfig.tracked_repos);
+    if (githubConfig?.config?.tracked_repos) {
+      setSelectedRepos(githubConfig.config.tracked_repos);
     } else {
       setSelectedRepos([]);
     }
-  }, [githubConfig?.tracked_repos]);
+  }, [githubConfig?.config?.tracked_repos]);
 
   // Listen for OAuth completion messages from popup windows
   useEffect(() => {

@@ -30,6 +30,7 @@ class IntegrationService:
             organization_id=organization_id,
             platform=integration_in.platform,
             credentials_encrypted=encrypted_creds,
+            config={},
             status=integration_in.status
         )
         db.add(integration)
