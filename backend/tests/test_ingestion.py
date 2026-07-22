@@ -215,3 +215,81 @@ async def test_webhook_ingest_slack_challenge(client: AsyncClient, db_session: A
     assert response.status_code == 200
     assert response.json()["challenge"] == "slack-test-challenge-123"
 
+
+async def test_webhook_ingest_github_ignored(client: AsyncClient, db_session: AsyncSession):
+    # Setup Tenant
+    user = User(email="github-ignore@tenant.com", password_hash=hash_password("password"))
+    db_session.add(user)
+    await db_session.commit()
+
+    org = Organization(name="GitHub Ignore Org", slug="github-ignore-org")
+    db_session.add(org)
+    await db_session.flush()
+
+    db_session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+    await db_session.commit()
+
+    # Create GitHub integration with tracked repos list
+    integration = Integration(
+        organization_id=org.id,
+        platform="github",
+        credentials_encrypted="some-secrets",
+        config={"tracked_repos": ["adhish1478/tracked-repo"]},
+        status="active"
+    )
+    db_session.add(integration)
+    await db_session.commit()
+
+    # POST GitHub payload from an untracked repository
+    response = await client.post(
+        f"/api/v1/ingest/{integration.id}",
+        json={
+            "repository": {"full_name": "adhish1478/untracked-repo"},
+            "head_commit": {"message": "random commit message", "author": {"name": "developer"}}
+        }
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
+    assert "not in the tracked repositories" in response.json()["reason"]
+
+
+async def test_webhook_ingest_slack_ignored(client: AsyncClient, db_session: AsyncSession):
+    # Setup Tenant
+    user = User(email="slack-ignore@tenant.com", password_hash=hash_password("password"))
+    db_session.add(user)
+    await db_session.commit()
+
+    org = Organization(name="Slack Ignore Org", slug="slack-ignore-org")
+    db_session.add(org)
+    await db_session.flush()
+
+    db_session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+    await db_session.commit()
+
+    # Create Slack integration with triage channel configuration
+    integration = Integration(
+        organization_id=org.id,
+        platform="slack",
+        credentials_encrypted="some-secrets",
+        config={"channel_id": "C_ALERTS", "channel_name": "#alerts"},
+        status="active"
+    )
+    db_session.add(integration)
+    await db_session.commit()
+
+    # POST Slack message payload from an untracked channel
+    response = await client.post(
+        f"/api/v1/ingest/{integration.id}",
+        json={
+            "event": {
+                "type": "message",
+                "channel": "C_GENERAL",
+                "text": "Critical database failure!",
+                "user": "U_BOT"
+            }
+        }
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "ignored"
+    assert "does not match configured triage channel" in response.json()["reason"]
+

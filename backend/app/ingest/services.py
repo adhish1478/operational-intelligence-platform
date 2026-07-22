@@ -93,6 +93,25 @@ class IngestService:
         Process the raw payload, correlate it against active investigations,
         and append it to MongoDB. Auto-creates a new SQL Investigation container if no match exists.
         """
+        # 0. Enforce tracking configurations
+        if integration.platform == "github":
+            repo_name = raw_payload.get("repository", {}).get("full_name")
+            tracked_repos = integration.config.get("tracked_repos", [])
+            if repo_name and repo_name not in tracked_repos:
+                return {
+                    "status": "ignored",
+                    "reason": f"Repository '{repo_name}' is not in the tracked repositories list."
+                }
+        elif integration.platform == "slack":
+            event = raw_payload.get("event", {})
+            channel_id = event.get("channel")
+            configured_channel_id = integration.config.get("channel_id")
+            if channel_id and channel_id != configured_channel_id:
+                return {
+                    "status": "ignored",
+                    "reason": f"Slack event channel '{channel_id}' does not match configured triage channel."
+                }
+
         # 1. Parse platform-specific payload fields
         parsed = IngestService.parse_webhook_payload(integration.platform, raw_payload)
         
