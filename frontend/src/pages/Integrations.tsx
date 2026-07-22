@@ -34,6 +34,16 @@ export const Integrations: React.FC = () => {
   const [selectedGmailQuery, setSelectedGmailQuery] = useState<string>('');
   const [savingGmailQuery, setSavingGmailQuery] = useState(false);
 
+  // Jira custom connection states
+  const [jiraHost, setJiraHost] = useState('');
+  const [jiraEmail, setJiraEmail] = useState('');
+  const [jiraToken, setJiraToken] = useState('');
+  const [submittingJira, setSubmittingJira] = useState(false);
+
+  // Jira custom config states
+  const [selectedJiraProjects, setSelectedJiraProjects] = useState<string>('');
+  const [savingJiraProjects, setSavingJiraProjects] = useState(false);
+
   // 1. Fetch configured integrations
   const { data: rawConfigs, isLoading, refetch } = useQuery({
     queryKey: ['integrations'],
@@ -96,6 +106,18 @@ export const Integrations: React.FC = () => {
       setSelectedGmailQuery('');
     }
   }, [gmailConfig?.config?.query]);
+
+  // Retrieve active Jira configuration
+  const jiraConfig = configuredList.find((c: any) => c.platform === 'jira');
+
+  // Sync selected Jira project keys state with loaded preferences
+  useEffect(() => {
+    if (jiraConfig?.config?.tracked_projects) {
+      setSelectedJiraProjects(jiraConfig.config.tracked_projects.join(', '));
+    } else {
+      setSelectedJiraProjects('');
+    }
+  }, [jiraConfig?.config?.tracked_projects]);
 
   // Listen for OAuth completion messages from popup windows
   useEffect(() => {
@@ -221,7 +243,7 @@ export const Integrations: React.FC = () => {
                   <div className="flex items-center gap-1.5 text-[11px] font-mono text-outline">
                     <RefreshCw className={`w-3.5 h-3.5 ${isPending ? 'animate-spin' : 'animate-spin-slow'}`} />
                     <span>Active Telemetry</span>
-                    {(connector.platform === 'github' || connector.platform === 'slack' || connector.platform === 'gmail') && (
+                    {(connector.platform === 'github' || connector.platform === 'slack' || connector.platform === 'gmail' || connector.platform === 'jira') && (
                       <button
                         onClick={() => setExpandedPlatform(expandedPlatform === connector.platform ? null : connector.platform)}
                         className="ml-1 p-0.5 rounded hover:bg-surface-low text-on-surface-variant hover:text-on-surface transition-colors"
@@ -236,7 +258,13 @@ export const Integrations: React.FC = () => {
                 )}
 
                 <button
-                  onClick={() => handleToggle(connector.platform, connectedId)}
+                  onClick={() => {
+                    if (connector.platform === 'jira' && !isConnected) {
+                      setExpandedPlatform(expandedPlatform === 'jira_connect' ? null : 'jira_connect');
+                    } else {
+                      handleToggle(connector.platform, connectedId);
+                    }
+                  }}
                   disabled={isPending}
                   className={`px-3 py-1.5 rounded text-body-sm font-semibold transition-colors disabled:opacity-50 ${
                     isConnected
@@ -442,6 +470,133 @@ export const Integrations: React.FC = () => {
                       className="px-2.5 py-1 bg-primary hover:bg-slate-800 text-white rounded text-[11px] font-bold transition-colors disabled:opacity-50"
                     >
                       {savingGmailQuery ? 'Saving...' : 'Save Settings'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Jira Inline Connect Credentials Form */}
+              {connector.platform === 'jira' && !isConnected && expandedPlatform === 'jira_connect' && (
+                <div className="mt-2 border-t border-outline-variant/60 pt-4 space-y-3">
+                  <div className="flex flex-col gap-1">
+                    <h4 className="text-[12px] font-bold text-on-surface uppercase tracking-wider">Connect Jira Cloud</h4>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      Provide your Atlassian credentials to validate and connect.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] uppercase font-bold text-outline">Host URL</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. https://company.atlassian.net"
+                        value={jiraHost}
+                        onChange={(e) => setJiraHost(e.target.value)}
+                        className="text-[12px] rounded border border-outline-variant bg-surface-low p-2.5 text-on-surface focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-outline-variant/60"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] uppercase font-bold text-outline">User Email</label>
+                      <input
+                        type="email"
+                        placeholder="e.g. analyst@company.com"
+                        value={jiraEmail}
+                        onChange={(e) => setJiraEmail(e.target.value)}
+                        className="text-[12px] rounded border border-outline-variant bg-surface-low p-2.5 text-on-surface focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-outline-variant/60"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] uppercase font-bold text-outline">API Token</label>
+                      <input
+                        type="password"
+                        placeholder="Atlassian API Token"
+                        value={jiraToken}
+                        onChange={(e) => setJiraToken(e.target.value)}
+                        className="text-[12px] rounded border border-outline-variant bg-surface-low p-2.5 text-on-surface focus:outline-none focus:ring-1 focus:ring-primary placeholder:text-outline-variant/60"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2 border-t border-outline-variant/40">
+                    <button
+                      onClick={async () => {
+                        if (!jiraHost || !jiraEmail || !jiraToken) {
+                          setError('Please fill in all Jira connection fields.');
+                          return;
+                        }
+                        setSubmittingJira(true);
+                        setError(null);
+                        try {
+                          await api.post('/integrations/jira/connect', {
+                            host_url: jiraHost,
+                            email: jiraEmail,
+                            api_token: jiraToken
+                          });
+                          await refetch();
+                          setExpandedPlatform(null);
+                          setJiraHost('');
+                          setJiraEmail('');
+                          setJiraToken('');
+                        } catch (err: any) {
+                          setError(err.response?.data?.detail || err.message || 'Failed to verify and connect to Jira.');
+                        } finally {
+                          setSubmittingJira(false);
+                        }
+                      }}
+                      disabled={submittingJira}
+                      className="px-3 py-1.5 bg-primary hover:bg-slate-800 text-white rounded text-[11px] font-bold transition-colors disabled:opacity-50"
+                    >
+                      {submittingJira ? 'Verifying...' : 'Verify & Connect'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Expanded Jira Project Selection Drawer */}
+              {connector.platform === 'jira' && isConnected && expandedPlatform === 'jira' && (
+                <div className="mt-2 border-t border-outline-variant/60 pt-4 space-y-3">
+                  <div className="flex flex-col gap-1">
+                    <h4 className="text-[12px] font-bold text-on-surface uppercase tracking-wider">Tracked Jira Projects</h4>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      Enter a list of comma-separated project keys (e.g. PROD, INFRA) to monitor.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="e.g. PROD, INFRA, SECURITY"
+                      value={selectedJiraProjects}
+                      onChange={(e) => setSelectedJiraProjects(e.target.value)}
+                      className="w-full text-[12px] rounded border border-outline-variant bg-surface-low p-2.5 text-on-surface focus:outline-none focus:ring-1 focus:ring-primary font-mono placeholder:text-outline-variant/60"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-outline-variant/40">
+                    <span className="text-[11px] text-outline font-mono truncate max-w-[200px]" title={selectedJiraProjects}>
+                      {selectedJiraProjects ? `Projects: ${selectedJiraProjects}` : 'Monitoring all projects'}
+                    </span>
+                    <button
+                      onClick={async () => {
+                        setSavingJiraProjects(true);
+                        try {
+                          const projectList = selectedJiraProjects.split(',').map(k => k.trim()).filter(Boolean);
+                          await api.post(`/integrations/jira/${connectedId}/config`, {
+                            tracked_projects: projectList
+                          });
+                          await refetch();
+                          setExpandedPlatform(null);
+                        } catch (err: any) {
+                          setError(err.message || 'Failed to save tracked projects.');
+                        } finally {
+                          setSavingJiraProjects(false);
+                        }
+                      }}
+                      disabled={savingJiraProjects}
+                      className="px-2.5 py-1 bg-primary hover:bg-slate-800 text-white rounded text-[11px] font-bold transition-colors disabled:opacity-50"
+                    >
+                      {savingJiraProjects ? 'Saving...' : 'Save Settings'}
                     </button>
                   </div>
                 </div>
