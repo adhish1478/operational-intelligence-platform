@@ -25,6 +25,10 @@ export const Integrations: React.FC = () => {
   const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [savingRepos, setSavingRepos] = useState(false);
+  
+  // Slack custom states
+  const [selectedChannel, setSelectedChannel] = useState<{ id: string; name: string } | null>(null);
+  const [savingChannel, setSavingChannel] = useState(false);
 
   // 1. Fetch configured integrations
   const { data: rawConfigs, isLoading, refetch } = useQuery({
@@ -54,10 +58,33 @@ export const Integrations: React.FC = () => {
     }
   }, [githubConfig?.config?.tracked_repos]);
 
+  // Retrieve active Slack configuration ID if connected
+  const slackConfig = configuredList.find((c: any) => c.platform === 'slack');
+  const slackConnectedId = slackConfig?.id;
+
+  // Fetch conversations/channels from Slack API via backend
+  const { data: channelList, isLoading: isLoadingChannels } = useQuery({
+    queryKey: ['slack-channels', slackConnectedId],
+    queryFn: () => api.get(`/integrations/slack/${slackConnectedId}/channels`),
+    enabled: !!slackConnectedId && expandedPlatform === 'slack'
+  });
+
+  // Sync selected triage channel with loaded preferences
+  useEffect(() => {
+    if (slackConfig?.config?.channel_id && slackConfig?.config?.channel_name) {
+      setSelectedChannel({
+        id: slackConfig.config.channel_id,
+        name: slackConfig.config.channel_name
+      });
+    } else {
+      setSelectedChannel(null);
+    }
+  }, [slackConfig?.config?.channel_id, slackConfig?.config?.channel_name]);
+
   // Listen for OAuth completion messages from popup windows
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'OIP_INTEGRATION_CONNECTED' && event.data?.platform === 'github') {
+      if (event.data?.type === 'OIP_INTEGRATION_CONNECTED') {
         refetch();
       }
     };
@@ -73,11 +100,11 @@ export const Integrations: React.FC = () => {
         // Disconnect integration
         await api.delete(`/integrations/${connectedId}`);
         await refetch();
-      } else if (platform === 'github') {
+      } else if (platform === 'github' || platform === 'slack') {
         // Open the authorization endpoint inside a centered popup window
         const token = localStorage.getItem('token') || '';
         const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
-        const authUrl = `${BASE_URL}/api/v1/integrations/github/authorize?token=${token}`;
+        const authUrl = `${BASE_URL}/api/v1/integrations/${platform}/authorize?token=${token}`;
         
         const width = 600;
         const height = 650;
@@ -86,7 +113,7 @@ export const Integrations: React.FC = () => {
         
         window.open(
           authUrl,
-          'Connect GitHub',
+          `Connect ${platform === 'github' ? 'GitHub' : 'Slack'}`,
           `width=${width},height=${height},left=${left},top=${top},status=no,menubar=no,toolbar=no`
         );
         return; // Popup opened
@@ -178,13 +205,13 @@ export const Integrations: React.FC = () => {
                   <div className="flex items-center gap-1.5 text-[11px] font-mono text-outline">
                     <RefreshCw className={`w-3.5 h-3.5 ${isPending ? 'animate-spin' : 'animate-spin-slow'}`} />
                     <span>Active Telemetry</span>
-                    {connector.platform === 'github' && (
+                    {(connector.platform === 'github' || connector.platform === 'slack') && (
                       <button
-                        onClick={() => setExpandedPlatform(expandedPlatform === 'github' ? null : 'github')}
+                        onClick={() => setExpandedPlatform(expandedPlatform === connector.platform ? null : connector.platform)}
                         className="ml-1 p-0.5 rounded hover:bg-surface-low text-on-surface-variant hover:text-on-surface transition-colors"
-                        title="Configure tracked repositories"
+                        title="Configure settings"
                       >
-                        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${expandedPlatform === 'github' ? 'rotate-180' : ''}`} />
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${expandedPlatform === connector.platform ? 'rotate-180' : ''}`} />
                       </button>
                     )}
                   </div>
@@ -282,6 +309,75 @@ export const Integrations: React.FC = () => {
                       className="px-2.5 py-1 bg-primary hover:bg-slate-800 text-white rounded text-[11px] font-bold transition-colors disabled:opacity-50"
                     >
                       {savingRepos ? 'Saving...' : 'Save Settings'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Expanded Slack Channel Selection Drawer */}
+              {connector.platform === 'slack' && isConnected && expandedPlatform === 'slack' && (
+                <div className="mt-2 border-t border-outline-variant/60 pt-4 space-y-3">
+                  <div className="flex flex-col gap-1">
+                    <h4 className="text-[12px] font-bold text-on-surface uppercase tracking-wider">Triage Target Channel</h4>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      Select the channel where the AI assistant should post triage summaries and reports.
+                    </p>
+                  </div>
+
+                  {isLoadingChannels ? (
+                    <div className="flex items-center gap-1.5 justify-center py-6 text-[11px] text-outline font-mono">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                      <span>Fetching channels...</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <select
+                        value={selectedChannel?.id || ''}
+                        onChange={(e) => {
+                          const target = channelList?.find((c: any) => c.id === e.target.value);
+                          if (target) {
+                            setSelectedChannel({ id: target.id, name: target.name });
+                          } else {
+                            setSelectedChannel(null);
+                          }
+                        }}
+                        className="w-full text-[12px] rounded border border-outline-variant/80 bg-surface-low p-2 text-on-surface focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                      >
+                        <option value="">-- Choose a Channel --</option>
+                        {channelList?.map((channel: any) => (
+                          <option key={channel.id} value={channel.id}>
+                            #{channel.name} {channel.is_private ? '🔒' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-2 border-t border-outline-variant/40">
+                    <span className="text-[11px] text-outline font-mono">
+                      {selectedChannel ? `#${selectedChannel.name}` : 'No channel selected'}
+                    </span>
+                    <button
+                      onClick={async () => {
+                        if (!selectedChannel) return;
+                        setSavingChannel(true);
+                        try {
+                          await api.post(`/integrations/slack/${connectedId}/config`, {
+                            channel_id: selectedChannel.id,
+                            channel_name: selectedChannel.name
+                          });
+                          await refetch();
+                          setExpandedPlatform(null);
+                        } catch (err: any) {
+                          setError(err.message || 'Failed to save channel selection.');
+                        } finally {
+                          setSavingChannel(false);
+                        }
+                      }}
+                      disabled={savingChannel || isLoadingChannels || !selectedChannel}
+                      className="px-2.5 py-1 bg-primary hover:bg-slate-800 text-white rounded text-[11px] font-bold transition-colors disabled:opacity-50"
+                    >
+                      {savingChannel ? 'Saving...' : 'Save Settings'}
                     </button>
                   </div>
                 </div>

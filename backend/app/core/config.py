@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_SECRET: str | None = None
     GITHUB_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/github/callback"
 
+    # Slacl OAuth Settings
+    SLACK_CLIENT_ID: str | None = None
+    SLACK_CLIENT_SECRET: str | None = None
+    SLACK_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/slack/callback"
+
 
     # Token Lifespans
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
