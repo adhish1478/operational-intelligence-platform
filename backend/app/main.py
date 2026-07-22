@@ -1,7 +1,24 @@
+from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1 import api_router
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start background worker
+    from app.integrations.gmail_worker import start_gmail_polling_worker
+    polling_task = asyncio.create_task(start_gmail_polling_worker())
+    
+    yield
+    
+    # Shutdown: Graceful cancellation
+    polling_task.cancel()
+    try:
+        await polling_task
+    except asyncio.CancelledError:
+        pass
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -9,6 +26,7 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
+    lifespan=lifespan,
 )
 
 # CORS Configuration
