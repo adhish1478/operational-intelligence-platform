@@ -30,6 +30,10 @@ export const Integrations: React.FC = () => {
   const [selectedChannel, setSelectedChannel] = useState<{ id: string; name: string } | null>(null);
   const [savingChannel, setSavingChannel] = useState(false);
 
+  // Gmail custom states
+  const [selectedGmailQuery, setSelectedGmailQuery] = useState<string>('');
+  const [savingGmailQuery, setSavingGmailQuery] = useState(false);
+
   // 1. Fetch configured integrations
   const { data: rawConfigs, isLoading, refetch } = useQuery({
     queryKey: ['integrations'],
@@ -81,6 +85,18 @@ export const Integrations: React.FC = () => {
     }
   }, [slackConfig?.config?.channel_id, slackConfig?.config?.channel_name]);
 
+  // Retrieve active Gmail configuration ID if connected
+  const gmailConfig = configuredList.find((c: any) => c.platform === 'gmail');
+
+  // Sync selected Gmail search query with loaded preferences
+  useEffect(() => {
+    if (gmailConfig?.config?.query) {
+      setSelectedGmailQuery(gmailConfig.config.query);
+    } else {
+      setSelectedGmailQuery('');
+    }
+  }, [gmailConfig?.config?.query]);
+
   // Listen for OAuth completion messages from popup windows
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -100,7 +116,7 @@ export const Integrations: React.FC = () => {
         // Disconnect integration
         await api.delete(`/integrations/${connectedId}`);
         await refetch();
-      } else if (platform === 'github' || platform === 'slack') {
+      } else if (platform === 'github' || platform === 'slack' || platform === 'gmail') {
         // Open the authorization endpoint inside a centered popup window
         const token = localStorage.getItem('token') || '';
         const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
@@ -113,7 +129,7 @@ export const Integrations: React.FC = () => {
         
         window.open(
           authUrl,
-          `Connect ${platform === 'github' ? 'GitHub' : 'Slack'}`,
+          `Connect ${platform === 'github' ? 'GitHub' : platform === 'slack' ? 'Slack' : 'Gmail'}`,
           `width=${width},height=${height},left=${left},top=${top},status=no,menubar=no,toolbar=no`
         );
         return; // Popup opened
@@ -205,7 +221,7 @@ export const Integrations: React.FC = () => {
                   <div className="flex items-center gap-1.5 text-[11px] font-mono text-outline">
                     <RefreshCw className={`w-3.5 h-3.5 ${isPending ? 'animate-spin' : 'animate-spin-slow'}`} />
                     <span>Active Telemetry</span>
-                    {(connector.platform === 'github' || connector.platform === 'slack') && (
+                    {(connector.platform === 'github' || connector.platform === 'slack' || connector.platform === 'gmail') && (
                       <button
                         onClick={() => setExpandedPlatform(expandedPlatform === connector.platform ? null : connector.platform)}
                         className="ml-1 p-0.5 rounded hover:bg-surface-low text-on-surface-variant hover:text-on-surface transition-colors"
@@ -378,6 +394,54 @@ export const Integrations: React.FC = () => {
                       className="px-2.5 py-1 bg-primary hover:bg-slate-800 text-white rounded text-[11px] font-bold transition-colors disabled:opacity-50"
                     >
                       {savingChannel ? 'Saving...' : 'Save Settings'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Expanded Gmail Filter Selection Drawer */}
+              {connector.platform === 'gmail' && isConnected && expandedPlatform === 'gmail' && (
+                <div className="mt-2 border-t border-outline-variant/60 pt-4 space-y-3">
+                  <div className="flex flex-col gap-1">
+                    <h4 className="text-[12px] font-bold text-on-surface uppercase tracking-wider">Triage Email Filter</h4>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      Type a Gmail search query (keywords, subject filters) that the assistant should poll for alerts.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      placeholder="e.g. from:alert@company.com subject:(critical OR warning)"
+                      value={selectedGmailQuery}
+                      onChange={(e) => setSelectedGmailQuery(e.target.value)}
+                      className="w-full text-[12px] rounded border border-outline-variant bg-surface-low p-2.5 text-on-surface focus:outline-none focus:ring-1 focus:ring-primary font-mono placeholder:text-outline-variant"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-outline-variant/40">
+                    <span className="text-[11px] text-outline font-mono truncate max-w-[200px]" title={selectedGmailQuery}>
+                      {selectedGmailQuery ? `Filter: "${selectedGmailQuery}"` : 'No filter query set'}
+                    </span>
+                    <button
+                      onClick={async () => {
+                        setSavingGmailQuery(true);
+                        try {
+                          await api.post(`/integrations/gmail/${connectedId}/config`, {
+                            query: selectedGmailQuery
+                          });
+                          await refetch();
+                          setExpandedPlatform(null);
+                        } catch (err: any) {
+                          setError(err.message || 'Failed to save email filter query.');
+                        } finally {
+                          setSavingGmailQuery(false);
+                        }
+                      }}
+                      disabled={savingGmailQuery}
+                      className="px-2.5 py-1 bg-primary hover:bg-slate-800 text-white rounded text-[11px] font-bold transition-colors disabled:opacity-50"
+                    >
+                      {savingGmailQuery ? 'Saving...' : 'Save Settings'}
                     </button>
                   </div>
                 </div>

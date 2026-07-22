@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     SLACK_CLIENT_SECRET: str | None = None
     SLACK_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/slack/callback"
 
+    # Google/Gmail OAuth Settings
+    GOOGLE_CLIENT_ID: str | None = None
+    GOOGLE_CLIENT_SECRET: str | None = None
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/gmail/callback"
+
 
     # Token Lifespans
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
