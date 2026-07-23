@@ -16,10 +16,12 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { mapInvestigation, mapEvidence } from '../lib/mappers';
 import type { Severity, Evidence, EntityReference } from '../types';
+import { EvidenceDetailModal } from '../components/EvidenceDetailModal';
 
 export const InvestigationDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  
+
+  const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
   const [commentText, setCommentText] = useState('');
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnoseError, setDiagnoseError] = useState<string | null>(null);
@@ -335,12 +337,13 @@ export const InvestigationDetails: React.FC = () => {
               evidenceList.map((ev: Evidence) => (
                 <div 
                   key={ev.id} 
-                  className="p-3 border border-outline-variant rounded bg-surface hover:border-outline transition-colors space-y-2 group"
+                  onClick={() => setSelectedEvidence(ev)}
+                  className="p-3.5 border border-outline-variant rounded-lg bg-surface hover:border-primary/50 transition-all space-y-2 group cursor-pointer shadow-xs"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {getEvidenceIcon(ev.type)}
-                      <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                      <span className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider font-mono">
                         {ev.type}
                       </span>
                       {ev.author && ev.author.name && (
@@ -357,6 +360,7 @@ export const InvestigationDetails: React.FC = () => {
                         href={ev.sourceUrl} 
                         target="_blank" 
                         rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
                         className="text-outline hover:text-primary transition-colors flex items-center gap-1 text-[10px]"
                       >
                         <span>Source</span>
@@ -365,21 +369,24 @@ export const InvestigationDetails: React.FC = () => {
                     )}
                   </div>
 
-                  <p className="text-body-sm text-on-surface leading-relaxed">
+                  <p className="text-body-sm font-medium text-on-surface leading-relaxed group-hover:text-primary transition-colors">
                     {ev.summary}
                   </p>
 
-                  {/* Integration specific metadata pills */}
+                  {/* Integration specific metadata pills (filtering out long body strings) */}
                   {ev.metadata && Object.keys(ev.metadata).length > 0 && (
                     <div className="flex flex-wrap gap-1.5 pt-1.5 border-t border-outline-variant/40">
-                      {Object.entries(ev.metadata).map(([key, val]) => (
-                        <span 
-                          key={key}
-                          className="text-[10px] bg-surface-low border border-outline-variant/60 text-on-surface-variant px-1.5 py-0.2 rounded font-mono"
-                        >
-                          {key}: {String(val)}
-                        </span>
-                      ))}
+                      {Object.entries(ev.metadata).map(([key, val]) => {
+                        if (key === 'body' || key === 'snippet') return null;
+                        return (
+                          <span 
+                            key={key}
+                            className="text-[10px] bg-surface-low border border-outline-variant/60 text-on-surface-variant px-2 py-0.5 rounded font-mono"
+                          >
+                            {key}: {String(val)}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -387,6 +394,13 @@ export const InvestigationDetails: React.FC = () => {
             )}
           </div>
         </div>
+
+        {/* Modal Viewer */}
+        <EvidenceDetailModal
+          isOpen={!!selectedEvidence}
+          onClose={() => setSelectedEvidence(null)}
+          evidence={selectedEvidence}
+        />
 
         {/* Pane 3 (Right / 3 Columns): Timeline Log & Entity Relationships */}
         <div className="lg:col-span-3 flex flex-col gap-4 min-h-0 overflow-y-auto">

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   ArrowRight, 
@@ -14,11 +14,13 @@ import { api } from '../lib/api';
 import { mapInvestigation, mapEvidence } from '../lib/mappers';
 import { useAuthStore } from '../store/authStore';
 import type { Severity, OperationalInvestigation, EntityReference, Evidence } from '../types';
+import { EvidenceDetailModal } from '../components/EvidenceDetailModal';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const operatorName = user?.first_name || 'Operator';
+  const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
 
   const { data: rawInvs, isLoading } = useQuery({
     queryKey: ['investigations'],
@@ -53,6 +55,13 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      {/* Evidence Viewer Modal */}
+      <EvidenceDetailModal
+        isOpen={!!selectedEvidence}
+        onClose={() => setSelectedEvidence(null)}
+        evidence={selectedEvidence}
+      />
+
       {/* Header and Welcome */}
       <div className="flex flex-col gap-1 border-b border-outline-variant pb-4">
         <h1 className="text-headline-lg text-on-surface">Attention Deck</h1>
@@ -217,12 +226,16 @@ export const Dashboard: React.FC = () => {
               </div>
             ) : (
               evidenceList.map((ev: Evidence) => (
-                <div key={ev.id} className="flex items-center justify-between text-body-sm py-1.5 border-b border-outline-variant/40 last:border-0 last:pb-0">
+                <div 
+                  key={ev.id} 
+                  onClick={() => setSelectedEvidence(ev)}
+                  className="flex items-center justify-between text-body-sm py-1.5 px-2 border-b border-outline-variant/40 last:border-0 cursor-pointer hover:bg-surface-low rounded transition-colors group"
+                >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-low border border-outline-variant/60 text-on-surface-variant uppercase font-semibold shrink-0">
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-low group-hover:bg-surface border border-outline-variant/60 text-on-surface-variant uppercase font-semibold shrink-0">
                       {ev.type}
                     </span>
-                    <span className="text-on-surface text-[12px] truncate" title={ev.summary}>
+                    <span className="text-on-surface text-[12px] truncate group-hover:text-primary transition-colors" title={ev.summary}>
                       {ev.summary}
                     </span>
                   </div>

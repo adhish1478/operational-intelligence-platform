@@ -101,6 +101,45 @@ async def fetch_gmail_message_details(access_token: str, message_id: str) -> dic
     return response.json()
 
 
+def extract_email_body(payload: dict) -> str:
+    """
+    Decodes and extracts text or html body from Gmail API message payload.
+    """
+    import base64
+
+    # Direct body in payload
+    body_data = payload.get("body", {}).get("data")
+    if body_data:
+        try:
+            return base64.urlsafe_b64decode(body_data.encode("ASCII")).decode("utf-8", errors="replace")
+        except Exception:
+            pass
+
+    # Multipart parts
+    parts = payload.get("parts", [])
+    for part in parts:
+        mime = part.get("mimeType", "")
+        if mime in ["text/plain", "text/html"]:
+            part_data = part.get("body", {}).get("data")
+            if part_data:
+                try:
+                    return base64.urlsafe_b64decode(part_data.encode("ASCII")).decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+
+        # Nested parts
+        subparts = part.get("parts", [])
+        for sub in subparts:
+            sub_data = sub.get("body", {}).get("data")
+            if sub_data:
+                try:
+                    return base64.urlsafe_b64decode(sub_data.encode("ASCII")).decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+
+    return ""
+
+
 async def sync_gmail_integration(integration: Integration, db: AsyncSession) -> None:
     """
     Synchronizes a single Gmail integration workspace.
@@ -177,6 +216,7 @@ async def sync_gmail_integration(integration: Integration, db: AsyncSession) -> 
                 sender = h.get("value", "Unknown Sender")
 
         snippet = details.get("snippet", "")
+        body_text = extract_email_body(details.get("payload", {})) or snippet
 
         # Format payload to match IngestService expectations
         payload = {
@@ -185,6 +225,7 @@ async def sync_gmail_integration(integration: Integration, db: AsyncSession) -> 
                 "subject": subject,
                 "from": sender,
                 "snippet": snippet,
+                "body": body_text,
             }
         }
 

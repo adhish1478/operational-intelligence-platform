@@ -23,9 +23,134 @@ class IngestService:
         stop_words = {
             "the", "and", "for", "from", "with", "this", "that", "alert", 
             "error", "sentry", "github", "slack", "jira", "gmail", "message", 
-            "commit", "issue", "incident", "outage", "broken", "failed"
+            "commit", "issue", "incident", "outage", "broken", "failed",
+            "gateway", "service", "system", "high", "critical", "bad",
+            "datadog", "stripe", "pagerduty", "spike", "spikes", "status",
+            "update", "notice", "info", "warning", "email", "report"
         }
         return {word for word in words if word not in stop_words}
+
+    @staticmethod
+    def extract_entities(text: str) -> dict[str, set[str]]:
+        """
+        Phase 1 - Step 1: Entity Extraction.
+        Extracts structured system entities from text:
+        - Services/Pods (e.g. auth-gateway, postgres-primary-east)
+        - Errors/Exceptions (e.g. 502, 504, OutOfMemoryError, ECONNRESET)
+        - Alert/Incident IDs (e.g. PD4920, STRIPE-CRIT-9021)
+        """
+        if not text:
+            return {"services": set(), "errors": set(), "alert_ids": set()}
+
+        # 1. Microservice / Pod Identifiers (hyphenated names containing lowercase letters/numbers)
+        services = set(re.findall(r'\b[a-z0-9]+(?:-[a-z0-9]+)+\b', text.lower()))
+
+        # 2. Error Codes & Exception Class Names (HTTP 5xx/4xx codes, or Java/Python Exception names)
+        error_codes = set(re.findall(r'\b[45]\d\d\b', text))
+        exceptions = set(re.findall(r'\b[A-Z][a-zA-Z0-9]*(?:Exception|Error)\b', text))
+        common_errors = set(re.findall(r'\b(?:ECONNRESET|ETIMEDOUT|OOM)\b', text, re.IGNORECASE))
+        errors = error_codes.union(exceptions).union({e.upper() for e in common_errors})
+
+        # 3. Alert & Incident Tracking IDs (e.g. PD4920, STRIPE-CRIT-9021, ISSUE-104)
+        alert_ids = set(re.findall(r'\b[A-Z]{2,}(?:-[A-Z0-9]+)+\b|\bPD\d+\b', text))
+
+        return {
+            "services": services,
+            "errors": errors,
+            "alert_ids": alert_ids,
+        }
+
+    @staticmethod
+    async def build_investigation_fingerprint(
+        investigation: Investigation, mongo_db: AsyncIOMotorDatabase
+    ) -> str:
+        """
+        Phase 1 - Step 2: Composite Investigation Fingerprint Builder.
+        Combines the Investigation title with summaries of all evidence previously attached to it in MongoDB.
+        """
+        title = investigation.title or ""
+        evidence_cursor = mongo_db.evidence.find({"investigation_id": str(investigation.id)})
+        evidence_list = await evidence_cursor.to_list(length=50)
+
+        evidence_summaries = [e.get("summary", "") for e in evidence_list if e.get("summary")]
+        composite_text = " ".join([title] + evidence_summaries)
+        return composite_text
+
+    @staticmethod
+    def compute_time_decay(detected_at: datetime | None, half_life_hours: float = 24.0) -> float:
+        """
+        Phase 1 - Step 3: Exponential Time-Decay Weighting.
+        Computes a score multiplier from 1.0 (brand new) down towards 0.0 (stale)
+        based on hours elapsed since the investigation was created.
+        """
+        if not detected_at:
+            return 1.0
+
+        now = datetime.now(timezone.utc)
+        if detected_at.tzinfo is None:
+            detected_at = detected_at.replace(tzinfo=timezone.utc)
+
+        elapsed_seconds = max((now - detected_at).total_seconds(), 0.0)
+        elapsed_hours = elapsed_seconds / 3600.0
+
+        decay = 0.5 ** (elapsed_hours / half_life_hours)
+        return float(decay)
+
+    @staticmethod
+    def score_correlation(
+        incoming_text: str,
+        investigation_fingerprint: str,
+        detected_at: datetime | None
+    ) -> float:
+        """
+        Phase 1 - Step 4: Weighted Correlation Scorer.
+        Calculates weighted composite score combining Entity Match (50%),
+        Keyword Similarity (30%), and Time Decay (Multiplier).
+        Returns float score between 0.0 and 1.0.
+        """
+        if not incoming_text or not investigation_fingerprint:
+            return 0.0
+
+        # 1. Entity Extraction Comparison
+        inc_entities = IngestService.extract_entities(incoming_text)
+        inv_entities = IngestService.extract_entities(investigation_fingerprint)
+
+        entity_score = 0.0
+        # Service/Pod Match (+0.60)
+        svc_overlap = inc_entities["services"].intersection(inv_entities["services"])
+        if svc_overlap:
+            entity_score += 0.60
+
+        # Error/Exception Match (+0.25)
+        err_overlap = inc_entities["errors"].intersection(inv_entities["errors"])
+        if err_overlap:
+            entity_score += 0.25
+
+        # Alert ID Match (+0.15)
+        alert_overlap = inc_entities["alert_ids"].intersection(inv_entities["alert_ids"])
+        if alert_overlap:
+            entity_score += 0.15
+
+        entity_score = min(entity_score, 1.0)
+
+        # 2. Keyword Jaccard Similarity Comparison
+        inc_keywords = IngestService.extract_keywords(incoming_text)
+        inv_keywords = IngestService.extract_keywords(investigation_fingerprint)
+
+        keyword_score = 0.0
+        if inc_keywords and inv_keywords:
+            intersection = len(inc_keywords.intersection(inv_keywords))
+            union = len(inc_keywords.union(inv_keywords))
+            keyword_score = intersection / union if union > 0 else 0.0
+
+        # 3. Time Decay Multiplier
+        time_decay = IngestService.compute_time_decay(detected_at)
+
+        # 4. Composite Weighted Score
+        base_score = (entity_score * 0.50) + (keyword_score * 0.30)
+        final_score = base_score * time_decay
+
+        return float(final_score)
 
     @staticmethod
     def platform_filter(integration: Integration, raw_payload: dict[str, Any]) -> tuple[bool, str | None]:
@@ -99,6 +224,15 @@ class IngestService:
                 subject = email.get("subject", "No Subject")
                 summary = subject
                 author_name = email.get("from")
+                snippet = email.get("snippet", "")
+                body = email.get("body") or snippet or summary
+                metadata = {
+                    "email_id": email.get("id"),
+                    "from": email.get("from"),
+                    "subject": subject,
+                    "snippet": snippet,
+                    "body": body
+                }
 
         return {
             "type": platform,
@@ -162,13 +296,17 @@ class IngestService:
 
     @staticmethod
     async def correlate_signal(
-        db: AsyncSession, organization_id: uuid.UUID, incoming_keywords: set[str]
+        db: AsyncSession,
+        mongo_db: AsyncIOMotorDatabase,
+        organization_id: uuid.UUID,
+        incoming_text: str
     ) -> Investigation | None:
         """
-        Stage 4: Correlation Engine.
-        Finds an active Investigation container with token overlap.
+        Stage 4: Advanced Correlation Engine (Phase 1).
+        Finds an active Investigation container with highest weighted correlation score
+        combining Entity Extraction, Composite Fingerprints, Keyword Similarity, and Time Decay.
         """
-        if not incoming_keywords:
+        if not incoming_text:
             return None
 
         statement = select(Investigation).where(
@@ -178,37 +316,57 @@ class IngestService:
         result = await db.execute(statement)
         active_investigations = result.scalars().all()
 
-        for inv in active_investigations:
-            inv_keywords = IngestService.extract_keywords(inv.title)
-            overlap = inv_keywords.intersection(incoming_keywords)
-            if len(overlap) > 0:
-                return inv
+        best_match = None
+        best_score = 0.0
 
-        return None
+        for inv in active_investigations:
+            fingerprint = await IngestService.build_investigation_fingerprint(inv, mongo_db)
+            score = IngestService.score_correlation(incoming_text, fingerprint, inv.detected_at)
+
+            # Minimum correlation confidence threshold (0.25)
+            if score >= 0.25 and score > best_score:
+                best_score = score
+                best_match = inv
+
+        return best_match
 
     @staticmethod
-    def is_incident_worthy(parsed: dict[str, Any]) -> bool:
+    def is_incident_worthy(integration: Integration, parsed: dict[str, Any]) -> bool:
         """
         Evaluates whether an un-correlated signal is incident-worthy
         justifying the creation of a new Investigation container in PostgreSQL.
+        Checks both user-configured integration rules and system incident keywords.
         """
         summary = (parsed.get("summary") or "").lower()
         metadata_str = str(parsed.get("metadata") or {}).lower()
         full_text = f"{summary} {metadata_str}"
+        config = integration.config or {}
 
-        # High-impact operational incident indicators
+        # 1. User-configured rule matches (required_keywords, subject_contains, subject_starts_with)
+        required_keywords = [k.lower() for k in config.get("required_keywords", []) if k and k.strip()]
+        if required_keywords and any(kw in full_text for kw in required_keywords):
+            return True
+
+        subject_contains = [sc.lower() for sc in config.get("subject_contains", []) if sc and sc.strip()]
+        if subject_contains and any(sc in summary for sc in subject_contains):
+            return True
+
+        subject_starts_with = [ss.lower() for ss in config.get("subject_starts_with", []) if ss and ss.strip()]
+        if subject_starts_with and any(summary.startswith(ss) for ss in subject_starts_with):
+            return True
+
+        # 2. High-impact operational incident indicators
         incident_keywords = {
             "critical", "outage", "error", "failed", "failure", "spiked",
             "leak", "exception", "down", "breach", "vulnerability", "emergency",
             "alert", "timeout", "latency", "exhaustion", "panic", "fatal"
         }
 
-        # Check keyword presence
         words = re.findall(r'\b[a-zA-Z]{3,}\b', full_text)
         if any(word in incident_keywords for word in words):
             return True
 
-        # Check metadata priority/severity
+        # 3. Check metadata priority/severity
         metadata = parsed.get("metadata") or {}
         if isinstance(metadata, dict):
             sev = str(metadata.get("severity") or metadata.get("priority") or "").lower()
@@ -257,9 +415,9 @@ class IngestService:
         if not is_signal:
             return {"status": "ignored", "reason": noise_reason}
 
-        # Step 4: Correlation Engine
-        incoming_keywords = IngestService.extract_keywords(parsed["summary"])
-        matched_inv = await IngestService.correlate_signal(db, integration.organization_id, incoming_keywords)
+        # Step 4: Correlation Engine (Phase 1 Advanced Weighted Scoring)
+        incoming_text = f"{parsed['summary']} {str(parsed.get('metadata') or {})}"
+        matched_inv = await IngestService.correlate_signal(db, mongo_db, integration.organization_id, incoming_text)
 
         if matched_inv is not None:
             # Match Found -> Attach Evidence to Existing Investigation Container
@@ -278,7 +436,7 @@ class IngestService:
             }
 
         # Step 5: Un-correlated Signal -> Evaluate Incident-Worthiness
-        if not IngestService.is_incident_worthy(parsed):
+        if not IngestService.is_incident_worthy(integration, parsed):
             # Not Incident-Worthy -> Store as standalone Evidence Only (do NOT pollute SQL investigations)
             evidence_in = EvidenceCreate(
                 type=parsed["type"],

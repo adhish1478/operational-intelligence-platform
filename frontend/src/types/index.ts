@@ -5,7 +5,7 @@ export type SourceSystem = 'slack' | 'jira' | 'gmail' | 'github' | 'notion';
 
 export interface Evidence {
   id: string;
-  type: 'slack' | 'jira' | 'github' | 'email' | 'notion';
+  type: 'gmail' | 'slack' | 'jira' | 'github' | 'email' | 'notion';
   timestamp: string;
   sourceUrl: string;
   summary: string;
