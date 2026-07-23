@@ -56,6 +56,7 @@ export const LandingPage: React.FC = () => {
       // 1. Submit Credentials to Login Endpoint
       const loginResp = await fetch(`${BASE_URL}/api/v1/auth/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
@@ -124,6 +125,7 @@ export const LandingPage: React.FC = () => {
       // Register user
       const regResp = await fetch(`${BASE_URL}/api/v1/auth/register`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,

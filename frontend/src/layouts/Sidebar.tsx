@@ -52,6 +52,7 @@ export const Sidebar: React.FC = () => {
             if (token) {
                 await fetch(`${BASE_URL}/api/v1/auth/logout`, {
                     method: 'POST',
+                    credentials: 'include',
                     headers: { 'Authorization': `Bearer ${token}` }
                 }).catch(() => {});
             }
