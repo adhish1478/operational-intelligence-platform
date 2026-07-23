@@ -29,15 +29,15 @@ export const GmailSettingsModal: React.FC<GmailSettingsModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Sync state with existing integration configuration
+  // Reset draft state with existing integration configuration whenever modal opens or existingConfig updates
   useEffect(() => {
-    if (existingConfig) {
+    if (isOpen && existingConfig) {
       setAllowedSenders(existingConfig.allowed_senders || []);
       setRequiredKeywords(existingConfig.required_keywords || []);
       setSubjectContains(existingConfig.subject_contains || []);
       setSubjectStartsWith(existingConfig.subject_starts_with || []);
     }
-  }, [existingConfig]);
+  }, [isOpen, existingConfig]);
 
   if (!isOpen) return null;
 

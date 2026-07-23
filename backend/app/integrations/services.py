@@ -23,9 +23,23 @@ class IntegrationService:
     async def create_integration(
         db: AsyncSession, organization_id: uuid.UUID, integration_in: IntegrationCreate
     ) -> Integration:
-        # Encrypt the incoming credentials dictionary to a secure string before saving to database
+        # Prevent duplicate integration rows for the same platform in an organization
+        statement = select(Integration).where(
+            Integration.organization_id == organization_id,
+            Integration.platform == integration_in.platform
+        )
+        existing = (await db.execute(statement)).scalar_one_or_none()
+
         encrypted_creds = encrypt_credentials(integration_in.credentials)
-        
+
+        if existing:
+            existing.credentials_encrypted = encrypted_creds
+            existing.status = integration_in.status
+            db.add(existing)
+            await db.commit()
+            await db.refresh(existing)
+            return existing
+
         integration = Integration(
             organization_id=organization_id,
             platform=integration_in.platform,
@@ -52,6 +66,10 @@ class IntegrationService:
         for field, value in update_data.items():
             setattr(db_obj, field, value)
             
+        if "config" in update_data:
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(db_obj, "config")
+
         db.add(db_obj)
         await db.commit()
         await db.refresh(db_obj)
