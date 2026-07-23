@@ -131,5 +131,5 @@ async def test_sync_gmail_integration(db_session: AsyncSession):
         mongo_db = get_mongo_db()
         evidences = await mongo_db.evidence.find({"investigation_id": str(invs[0].id)}).to_list(length=10)
         assert len(evidences) == 1
-        assert evidences[0]["summary"] == "Gmail Alert: Sentry Alert: Server crashed"
+        assert evidences[0]["summary"] == "Sentry Alert: Server crashed"
         assert evidences[0]["author_name"] == "alerts@sentry.io"

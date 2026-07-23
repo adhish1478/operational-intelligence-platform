@@ -52,6 +52,9 @@ TestSessionLocal = async_sessionmaker(
 )
 
 
+# Set environment to testing mode to isolate test databases
+settings.ENVIRONMENT = "testing"
+
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def initialize_db():
     """Ensure database tables exist before running any tests."""
@@ -59,9 +62,6 @@ async def initialize_db():
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
-
-    # We do not drop tables here in case developer has custom data, 
-    # but in fresh CI we could.
 
 
 @pytest_asyncio.fixture

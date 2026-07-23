@@ -10,6 +10,7 @@ from app.investigations.models import Investigation
 from app.evidence.schemas import EvidenceCreate
 from app.evidence.services import EvidenceService
 
+
 class IngestService:
     @staticmethod
     def extract_keywords(text: str) -> set[str]:
@@ -18,7 +19,6 @@ class IngestService:
         """
         if not text:
             return set()
-        # Find all words with length >= 3
         words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
         stop_words = {
             "the", "and", "for", "from", "with", "this", "that", "alert", 
@@ -28,12 +28,41 @@ class IngestService:
         return {word for word in words if word not in stop_words}
 
     @staticmethod
-    def parse_webhook_payload(platform: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def platform_filter(integration: Integration, raw_payload: dict[str, Any]) -> tuple[bool, str | None]:
         """
-        Parse raw webhook payload depending on the integration platform.
+        Stage 1: Platform Filter.
+        Validates basic integration boundary rules (tracked repos, channels, project keys).
+        """
+        platform = integration.platform
+        config = integration.config or {}
+
+        if platform == "github":
+            repo_name = raw_payload.get("repository", {}).get("full_name")
+            tracked_repos = config.get("tracked_repos", [])
+            if tracked_repos and repo_name and repo_name not in tracked_repos:
+                return False, f"Repository '{repo_name}' is not in the tracked repositories list."
+        elif platform == "slack":
+            event = raw_payload.get("event", {})
+            channel_id = event.get("channel")
+            configured_channel_id = config.get("channel_id")
+            if configured_channel_id and channel_id and channel_id != configured_channel_id:
+                return False, f"Slack event channel '{channel_id}' does not match configured triage channel."
+        elif platform == "jira":
+            issue = raw_payload.get("issue", {})
+            project_key = issue.get("fields", {}).get("project", {}).get("key")
+            tracked_projects = config.get("tracked_projects", [])
+            if tracked_projects and project_key and project_key not in tracked_projects:
+                return False, f"Jira project '{project_key}' is not in the tracked projects list."
+
+        return True, None
+
+    @staticmethod
+    def normalize_payload(platform: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        Stage 2: Normalize Payload.
         Extracts summary, author, source_url, and structured metadata.
         """
-        summary = "Unrecognized webhook alert payload"
+        summary = "Unrecognized telemetry payload"
         author_name = None
         source_url = None
         metadata = payload
@@ -41,15 +70,14 @@ class IngestService:
         if platform == "slack":
             event = payload.get("event", {})
             text = event.get("text", "")
-            summary = f"Slack Alert: {text[:100]}..." if len(text) > 100 else f"Slack Alert: {text}"
+            summary = f"{text[:100]}..." if len(text) > 100 else text
             author_name = event.get("user")
             
         elif platform == "github":
-            # GitHub Push webhook payload structure
             commit = payload.get("head_commit", {})
             if commit:
                 msg = commit.get("message", "")
-                summary = f"GitHub Commit: {msg[:100]}..." if len(msg) > 100 else f"GitHub Commit: {msg}"
+                summary = f"{msg[:100]}..." if len(msg) > 100 else msg
                 author_name = commit.get("author", {}).get("username") or commit.get("author", {}).get("name")
                 source_url = commit.get("url")
             else:
@@ -57,7 +85,6 @@ class IngestService:
                 summary = f"GitHub Event on repository: {repo_name}"
 
         elif platform == "jira":
-            # Jira webhook payload structure
             issue = payload.get("issue", {})
             if issue:
                 key = issue.get("key", "JIRA-KEY")
@@ -67,11 +94,10 @@ class IngestService:
                 author_name = fields.get("creator", {}).get("displayName")
                 
         elif platform == "gmail":
-            # Gmail inbox alert structure
             email = payload.get("email", {})
             if email:
                 subject = email.get("subject", "No Subject")
-                summary = f"Gmail Alert: {subject}"
+                summary = subject
                 author_name = email.get("from")
 
         return {
@@ -82,6 +108,118 @@ class IngestService:
             "metadata": metadata
         }
 
+    # Alias for backward compatibility
+    parse_webhook_payload = normalize_payload
+
+    @staticmethod
+    def classify_signal(integration: Integration, parsed: dict[str, Any]) -> tuple[bool, str | None]:
+        """
+        Stage 3: Signal / Noise Classification.
+        Deterministic, rule-based classifier evaluating integration configuration rules.
+        Supports: allowed_senders, required_keywords, subject_filters.
+        """
+        config = integration.config or {}
+        author = (parsed.get("author_name") or "").lower()
+        summary = (parsed.get("summary") or "").lower()
+        metadata = parsed.get("metadata") or {}
+
+        # 1. Allowed Senders Check (e.g. Gmail / Slack senders)
+        allowed_senders = config.get("allowed_senders", [])
+        if allowed_senders:
+            sender_matched = any(sender.lower() in author for sender in allowed_senders)
+            if not sender_matched:
+                return False, f"Sender '{parsed.get('author_name')}' is not in allowed_senders list."
+
+        # 2. Required Keywords Check
+        required_keywords = config.get("required_keywords", [])
+        if required_keywords:
+            full_text = f"{summary} {str(metadata)}".lower()
+            keyword_matched = any(kw.lower() in full_text for kw in required_keywords)
+            if not keyword_matched:
+                return False, "Signal does not contain any of the required_keywords."
+
+        # 3. Subject / Summary Filters Check
+        subject_filters = config.get("subject_filters", []) or config.get("optional_subject_filters", [])
+        if subject_filters:
+            subject_matched = any(sf.lower() in summary for sf in subject_filters)
+            if not subject_matched:
+                return False, "Signal subject does not match subject_filters."
+
+        # 4. Trivial content noise check
+        if not summary or summary.strip() in ["Slack Alert:", "Gmail Alert: No Subject", "Unrecognized telemetry payload"]:
+            return False, "Signal classified as operational noise due to missing or empty summary content."
+
+        return True, None
+
+    @staticmethod
+    async def correlate_signal(
+        db: AsyncSession, organization_id: uuid.UUID, incoming_keywords: set[str]
+    ) -> Investigation | None:
+        """
+        Stage 4: Correlation Engine.
+        Finds an active Investigation container with token overlap.
+        """
+        if not incoming_keywords:
+            return None
+
+        statement = select(Investigation).where(
+            Investigation.organization_id == organization_id,
+            Investigation.status.in_(["open", "investigating"])
+        )
+        result = await db.execute(statement)
+        active_investigations = result.scalars().all()
+
+        for inv in active_investigations:
+            inv_keywords = IngestService.extract_keywords(inv.title)
+            overlap = inv_keywords.intersection(incoming_keywords)
+            if len(overlap) > 0:
+                return inv
+
+        return None
+
+    @staticmethod
+    def is_incident_worthy(parsed: dict[str, Any]) -> bool:
+        """
+        Evaluates whether an un-correlated signal is incident-worthy
+        justifying the creation of a new Investigation container in PostgreSQL.
+        """
+        summary = (parsed.get("summary") or "").lower()
+        metadata_str = str(parsed.get("metadata") or {}).lower()
+        full_text = f"{summary} {metadata_str}"
+
+        # High-impact operational incident indicators
+        incident_keywords = {
+            "critical", "outage", "error", "failed", "failure", "spiked",
+            "leak", "exception", "down", "breach", "vulnerability", "emergency",
+            "alert", "timeout", "latency", "exhaustion", "panic", "fatal"
+        }
+
+        # Check keyword presence
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', full_text)
+        if any(word in incident_keywords for word in words):
+            return True
+
+        # Check metadata priority/severity
+        metadata = parsed.get("metadata") or {}
+        if isinstance(metadata, dict):
+            sev = str(metadata.get("severity") or metadata.get("priority") or "").lower()
+            if sev in ["critical", "high", "p0", "p1", "blocker"]:
+                return True
+
+        return False
+
+    @staticmethod
+    def compute_severity(summary: str) -> str:
+        """
+        Heuristic severity classifier for newly created investigations.
+        """
+        lower_summary = summary.lower()
+        if "critical" in lower_summary or "outage" in lower_summary or "severity 1" in lower_summary or "p0" in lower_summary:
+            return "critical"
+        elif "error" in lower_summary or "failed" in lower_summary or "spiked" in lower_summary or "leak" in lower_summary or "p1" in lower_summary:
+            return "high"
+        return "medium"
+
     @staticmethod
     async def correlate_and_process(
         db: AsyncSession,
@@ -90,56 +228,32 @@ class IngestService:
         raw_payload: dict[str, Any]
     ) -> dict[str, Any]:
         """
-        Process the raw payload, correlate it against active investigations,
-        and append it to MongoDB. Auto-creates a new SQL Investigation container if no match exists.
+        Ingestion Pipeline Orchestrator:
+        1. Platform Filter
+        2. Normalize Payload
+        3. Signal / Noise Classification
+        4. Correlation Engine
+        5. Incident-Worthiness Evaluation & Storage Routing
         """
-        # 0. Enforce tracking configurations
-        if integration.platform == "github":
-            repo_name = raw_payload.get("repository", {}).get("full_name")
-            tracked_repos = integration.config.get("tracked_repos", [])
-            if repo_name and repo_name not in tracked_repos:
-                return {
-                    "status": "ignored",
-                    "reason": f"Repository '{repo_name}' is not in the tracked repositories list."
-                }
-        elif integration.platform == "slack":
-            event = raw_payload.get("event", {})
-            channel_id = event.get("channel")
-            configured_channel_id = integration.config.get("channel_id")
-            if channel_id and channel_id != configured_channel_id:
-                return {
-                    "status": "ignored",
-                    "reason": f"Slack event channel '{channel_id}' does not match configured triage channel."
-                }
+        # Step 1: Platform Filter
+        allowed, filter_reason = IngestService.platform_filter(integration, raw_payload)
+        if not allowed:
+            return {"status": "ignored", "reason": filter_reason}
 
-        # 1. Parse platform-specific payload fields
-        parsed = IngestService.parse_webhook_payload(integration.platform, raw_payload)
-        
-        # 2. Extract keywords from parsed summary
+        # Step 2: Normalize Payload
+        parsed = IngestService.normalize_payload(integration.platform, raw_payload)
+
+        # Step 3: Signal / Noise Classification
+        is_signal, noise_reason = IngestService.classify_signal(integration, parsed)
+        if not is_signal:
+            return {"status": "ignored", "reason": noise_reason}
+
+        # Step 4: Correlation Engine
         incoming_keywords = IngestService.extract_keywords(parsed["summary"])
-        
-        # 3. Fetch active investigations for this tenant
-        statement = select(Investigation).where(
-            Investigation.organization_id == integration.organization_id,
-            Investigation.status.in_(["open", "investigating"])
-        )
-        result = await db.execute(statement)
-        active_investigations = result.scalars().all()
-        
-        matched_investigation = None
-        
-        # 4. Check keyword overlap for correlation
-        for inv in active_investigations:
-            inv_keywords = IngestService.extract_keywords(inv.title)
-            # Find common keywords
-            overlap = inv_keywords.intersection(incoming_keywords)
-            if len(overlap) > 0:
-                matched_investigation = inv
-                break
-                
-        # 5. Route to Database
-        if matched_investigation is not None:
-            # Match found -> Appends evidence directly to matched investigation
+        matched_inv = await IngestService.correlate_signal(db, integration.organization_id, incoming_keywords)
+
+        if matched_inv is not None:
+            # Match Found -> Attach Evidence to Existing Investigation Container
             evidence_in = EvidenceCreate(
                 type=parsed["type"],
                 summary=parsed["summary"],
@@ -147,34 +261,16 @@ class IngestService:
                 source_url=parsed["source_url"],
                 metadata=parsed["metadata"]
             )
-            evidence = await EvidenceService.create_evidence(mongo_db, matched_investigation.id, evidence_in)
+            evidence = await EvidenceService.create_evidence(mongo_db, matched_inv.id, evidence_in)
             return {
                 "status": "correlated",
-                "investigation_id": matched_investigation.id,
+                "investigation_id": matched_inv.id,
                 "evidence_id": evidence.id
             }
-        else:
-            # No match found -> Auto-creates a new SQL investigation
-            severity = "medium"
-            lower_summary = parsed["summary"].lower()
-            if "critical" in lower_summary or "outage" in lower_summary or "severity 1" in lower_summary:
-                severity = "critical"
-            elif "error" in lower_summary or "failed" in lower_summary or "spiked" in lower_summary or "leak" in lower_summary:
-                severity = "high"
 
-                
-            new_inv = Investigation(
-                organization_id=integration.organization_id,
-                title=parsed["summary"],
-                description=f"Auto-created from incoming {integration.platform} webhook payload.",
-                severity=severity,
-                status="open"
-            )
-            db.add(new_inv)
-            await db.commit()
-            await db.refresh(new_inv)
-            
-            # Save payload as the first evidence of this new investigation container
+        # Step 5: Un-correlated Signal -> Evaluate Incident-Worthiness
+        if not IngestService.is_incident_worthy(parsed):
+            # Not Incident-Worthy -> Store as standalone Evidence Only (do NOT pollute SQL investigations)
             evidence_in = EvidenceCreate(
                 type=parsed["type"],
                 summary=parsed["summary"],
@@ -182,10 +278,37 @@ class IngestService:
                 source_url=parsed["source_url"],
                 metadata=parsed["metadata"]
             )
-            evidence = await EvidenceService.create_evidence(mongo_db, new_inv.id, evidence_in)
-            
+            evidence = await EvidenceService.create_evidence(mongo_db, None, evidence_in)
             return {
-                "status": "created",
-                "investigation_id": new_inv.id,
-                "evidence_id": evidence.id
+                "status": "evidence_only",
+                "evidence_id": evidence.id,
+                "reason": "Signal stored as standalone evidence; not incident-worthy for new Investigation creation."
             }
+
+        # Incident-Worthy -> Create new SQL Investigation & attach Evidence
+        severity = IngestService.compute_severity(parsed["summary"])
+        new_inv = Investigation(
+            organization_id=integration.organization_id,
+            title=parsed["summary"],
+            description=f"Auto-created from incoming {integration.platform} event signal.",
+            severity=severity,
+            status="open"
+        )
+        db.add(new_inv)
+        await db.commit()
+        await db.refresh(new_inv)
+
+        evidence_in = EvidenceCreate(
+            type=parsed["type"],
+            summary=parsed["summary"],
+            author_name=parsed["author_name"],
+            source_url=parsed["source_url"],
+            metadata=parsed["metadata"]
+        )
+        evidence = await EvidenceService.create_evidence(mongo_db, new_inv.id, evidence_in)
+
+        return {
+            "status": "created",
+            "investigation_id": new_inv.id,
+            "evidence_id": evidence.id
+        }

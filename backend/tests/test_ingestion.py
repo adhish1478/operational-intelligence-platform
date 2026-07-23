@@ -293,3 +293,123 @@ async def test_webhook_ingest_slack_ignored(client: AsyncClient, db_session: Asy
     assert response.json()["status"] == "ignored"
     assert "does not match configured triage channel" in response.json()["reason"]
 
+
+async def test_ingestion_gmail_rules_ignored(client: AsyncClient, db_session: AsyncSession):
+    # Setup Tenant User, Org, and Gmail Integration with Config Rules
+    user = User(email="gmail-rule@tenant.com", password_hash=hash_password("password"))
+    db_session.add(user)
+    await db_session.commit()
+
+    org = Organization(name="Gmail Rule Org", slug="gmail-rule-org")
+    db_session.add(org)
+    await db_session.flush()
+
+    db_session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+    await db_session.commit()
+
+    integration = Integration(
+        organization_id=org.id,
+        platform="gmail",
+        credentials_encrypted="some-secrets",
+        config={
+            "allowed_senders": ["alerts@datadog.com", "github@github.com"],
+            "required_keywords": ["critical", "outage", "error"]
+        },
+        status="active"
+    )
+    db_session.add(integration)
+    await db_session.commit()
+
+    # 1. Email from unallowed sender -> Ignored
+    res1 = await client.post(
+        f"/api/v1/ingest/{integration.id}",
+        json={
+            "email": {
+                "from": "spammer@newsletter.com",
+                "subject": "Critical Security Updates for You"
+            }
+        }
+    )
+    assert res1.status_code == 200
+    assert res1.json()["status"] == "ignored"
+    assert "not in allowed_senders" in res1.json()["reason"]
+
+    # 2. Email from allowed sender but missing required keywords -> Ignored
+    res2 = await client.post(
+        f"/api/v1/ingest/{integration.id}",
+        json={
+            "email": {
+                "from": "alerts@datadog.com",
+                "subject": "Weekly Newsletter Digest"
+            }
+        }
+    )
+    assert res2.status_code == 200
+    assert res2.json()["status"] == "ignored"
+    assert "required_keywords" in res2.json()["reason"]
+
+    # 3. Email from allowed sender with required keyword -> Processed
+    res3 = await client.post(
+        f"/api/v1/ingest/{integration.id}",
+        json={
+            "email": {
+                "from": "alerts@datadog.com",
+                "subject": "Datadog Alert: Critical memory leak on auth-gateway"
+            }
+        }
+    )
+    assert res3.status_code == 200
+    assert res3.json()["status"] == "created"
+
+
+async def test_ingestion_not_incident_worthy_evidence_only(client: AsyncClient, db_session: AsyncSession):
+    # Setup Tenant User, Org, and GitHub Integration
+    user = User(email="routine@tenant.com", password_hash=hash_password("password"))
+    db_session.add(user)
+    await db_session.commit()
+
+    org = Organization(name="Routine Org", slug="routine-org")
+    db_session.add(org)
+    await db_session.flush()
+
+    db_session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+    await db_session.commit()
+
+    integration = Integration(
+        organization_id=org.id,
+        platform="github",
+        credentials_encrypted="some-secrets",
+        status="active"
+    )
+    db_session.add(integration)
+    await db_session.commit()
+
+    # Ingest routine commit ("update documentation formatting") -> No match, NOT incident-worthy
+    response = await client.post(
+        f"/api/v1/ingest/{integration.id}",
+        json={
+            "head_commit": {
+                "message": "update documentation formatting",
+                "author": {"name": "Alice Developer"},
+                "url": "https://github.com/repo/commit/123"
+            }
+        }
+    )
+    assert response.status_code == 200
+    res = response.json()
+    assert res["status"] == "evidence_only"
+    assert "evidence_id" in res
+    assert "investigation_id" not in res
+
+    # Check PostgreSQL: Verify NO Investigation container was created
+    statement = select(Investigation).where(Investigation.organization_id == org.id)
+    invs = (await db_session.execute(statement)).scalars().all()
+    assert len(invs) == 0
+
+    # Check MongoDB: Verify Evidence was saved with investigation_id = None
+    mongo_db = get_mongo_db()
+    evidence_doc = await mongo_db.evidence.find_one({"_id": res["evidence_id"]})
+    assert evidence_doc is not None
+    assert evidence_doc["investigation_id"] is None
+    assert evidence_doc["type"] == "github"
+

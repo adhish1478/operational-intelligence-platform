@@ -15,7 +15,7 @@ class EvidenceCreate(EvidenceBase):
 
 class EvidenceRead(EvidenceBase):
     id: uuid.UUID
-    investigation_id: uuid.UUID
+    investigation_id: uuid.UUID | None = Field(None)
     created_at: datetime
 
     model_config = {

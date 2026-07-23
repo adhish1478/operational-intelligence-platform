@@ -9,12 +9,15 @@ def get_mongo_db() -> AsyncIOMotorDatabase:
     """
     Returns the motor database instance, caching the client per running event loop
     to ensure compatibility with pytest's per-test event loops.
+    Automatically uses MONGODB_TEST_DB when ENVIRONMENT is set to 'testing'.
     """
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
-        
+
+    db_name = settings.MONGODB_TEST_DB if settings.ENVIRONMENT == "testing" else settings.MONGODB_DB
+
     if loop is not None:
         if loop not in _mongo_clients:
             _mongo_clients[loop] = AsyncIOMotorClient(settings.MONGODB_URL)
@@ -22,4 +25,4 @@ def get_mongo_db() -> AsyncIOMotorDatabase:
     else:
         client = AsyncIOMotorClient(settings.MONGODB_URL)
         
-    return client[settings.MONGODB_DB]
+    return client[db_name]
