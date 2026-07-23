@@ -115,38 +115,47 @@ class IngestService:
     def classify_signal(integration: Integration, parsed: dict[str, Any]) -> tuple[bool, str | None]:
         """
         Stage 3: Signal / Noise Classification.
-        Deterministic, rule-based classifier evaluating integration configuration rules.
-        Supports: allowed_senders, required_keywords, subject_filters.
+        Inclusive OR Signal Classification Model:
+        If ANY configured trigger (Allowed Senders, Subject Rules, or Keyword Rules) matches,
+        the incoming telemetry is classified as a valid operational Signal.
         """
         config = integration.config or {}
         author = (parsed.get("author_name") or "").lower()
         summary = (parsed.get("summary") or "").lower()
         metadata = parsed.get("metadata") or {}
+        full_text = f"{summary} {str(metadata)}".lower()
 
-        # 1. Allowed Senders Check (e.g. Gmail / Slack senders)
-        allowed_senders = config.get("allowed_senders", [])
-        if allowed_senders:
-            sender_matched = any(sender.lower() in author for sender in allowed_senders)
-            if not sender_matched:
-                return False, f"Sender '{parsed.get('author_name')}' is not in allowed_senders list."
+        allowed_senders = [s.lower() for s in config.get("allowed_senders", []) if s and s.strip()]
+        required_keywords = [k.lower() for k in config.get("required_keywords", []) if k and k.strip()]
+        subject_contains = [sc.lower() for sc in config.get("subject_contains", []) if sc and sc.strip()]
+        subject_starts_with = [ss.lower() for ss in config.get("subject_starts_with", []) if ss and ss.strip()]
 
-        # 2. Required Keywords Check
-        required_keywords = config.get("required_keywords", [])
-        if required_keywords:
-            full_text = f"{summary} {str(metadata)}".lower()
-            keyword_matched = any(kw.lower() in full_text for kw in required_keywords)
-            if not keyword_matched:
-                return False, "Signal does not contain any of the required_keywords."
+        has_any_configured_rules = bool(allowed_senders or required_keywords or subject_contains or subject_starts_with)
 
-        # 3. Subject / Summary Filters Check
-        subject_filters = config.get("subject_filters", []) or config.get("optional_subject_filters", [])
-        if subject_filters:
-            subject_matched = any(sf.lower() in summary for sf in subject_filters)
-            if not subject_matched:
-                return False, "Signal subject does not match subject_filters."
+        if has_any_configured_rules:
+            # Trigger 1: Allowed Sender Match
+            if allowed_senders and any(sender in author for sender in allowed_senders):
+                return True, None
 
-        # 4. Trivial content noise check
-        if not summary or summary.strip() in ["Slack Alert:", "Gmail Alert: No Subject", "Unrecognized telemetry payload"]:
+            # Trigger 2: Subject Rule Match (Contains or Starts With)
+            if subject_contains and any(sc in summary for sc in subject_contains):
+                return True, None
+
+            if subject_starts_with and any(
+                summary.startswith(ss) or summary.startswith(f"gmail alert: {ss}")
+                for ss in subject_starts_with
+            ):
+                return True, None
+
+            # Trigger 3: Keyword Rule Match
+            if required_keywords and any(kw in full_text for kw in required_keywords):
+                return True, None
+
+            # None of the configured OR triggers matched -> Reject as noise
+            return False, "Signal does not match any of the configured allowed senders, subject rules, or keyword rules."
+
+        # Trivial content noise check if no rules are configured
+        if not summary or summary.strip() in ["No Subject", "Unrecognized telemetry payload"]:
             return False, "Signal classified as operational noise due to missing or empty summary content."
 
         return True, None

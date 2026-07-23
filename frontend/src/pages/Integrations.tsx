@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { RefreshCw, ShieldAlert, ChevronDown, Loader2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { GmailSettingsModal } from '../components/gmail/GmailSettingsModal';
 
 interface PotentialConnector {
   platform: 'slack' | 'github' | 'jira' | 'gmail';
@@ -20,6 +21,9 @@ const POTENTIAL_CONNECTORS: PotentialConnector[] = [
 export const Integrations: React.FC = () => {
   const [mutatingId, setMutatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Gmail Settings Modal state
+  const [isGmailModalOpen, setIsGmailModalOpen] = useState(false);
   
   // UI Expand state for select drawer
   const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
@@ -255,6 +259,16 @@ export const Integrations: React.FC = () => {
                   </div>
                 ) : (
                   <span className="text-[11px] text-outline italic">Not synchronized</span>
+                )}
+
+                {isConnected && connector.platform === 'gmail' && (
+                  <button
+                    onClick={() => setIsGmailModalOpen(true)}
+                    className="px-2.5 py-1.5 rounded text-body-sm font-semibold bg-surface-low hover:bg-surface-high text-on-surface border border-outline-variant/80 transition-colors flex items-center gap-1 shrink-0"
+                    title="Configure Gmail Signal Filtering Rules"
+                  >
+                    <span>⚙️ Settings</span>
+                  </button>
                 )}
 
                 <button
@@ -606,6 +620,17 @@ export const Integrations: React.FC = () => {
           );
         })}
       </div>
+
+      {/* Gmail Signal Filtering Settings Modal */}
+      {gmailConfig && (
+        <GmailSettingsModal
+          isOpen={isGmailModalOpen}
+          onClose={() => setIsGmailModalOpen(false)}
+          integrationId={gmailConfig.id}
+          existingConfig={gmailConfig.config}
+          onSaveSuccess={refetch}
+        />
+      )}
 
     </div>
   );

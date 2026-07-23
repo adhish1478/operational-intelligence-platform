@@ -320,21 +320,21 @@ async def test_ingestion_gmail_rules_ignored(client: AsyncClient, db_session: As
     db_session.add(integration)
     await db_session.commit()
 
-    # 1. Email from unallowed sender -> Ignored
+    # 1. Email from unallowed sender with NO matching keywords or subject -> Ignored
     res1 = await client.post(
         f"/api/v1/ingest/{integration.id}",
         json={
             "email": {
                 "from": "spammer@newsletter.com",
-                "subject": "Critical Security Updates for You"
+                "subject": "Weekly Tech Summary"
             }
         }
     )
     assert res1.status_code == 200
     assert res1.json()["status"] == "ignored"
-    assert "not in allowed_senders" in res1.json()["reason"]
+    assert "does not match any" in res1.json()["reason"]
 
-    # 2. Email from allowed sender but missing required keywords -> Ignored
+    # 2. Email from allowed sender without keywords -> Processed as Signal (Allowed Sender trigger)
     res2 = await client.post(
         f"/api/v1/ingest/{integration.id}",
         json={
@@ -345,16 +345,15 @@ async def test_ingestion_gmail_rules_ignored(client: AsyncClient, db_session: As
         }
     )
     assert res2.status_code == 200
-    assert res2.json()["status"] == "ignored"
-    assert "required_keywords" in res2.json()["reason"]
+    assert res2.json()["status"] in ["created", "evidence_only"]
 
-    # 3. Email from allowed sender with required keyword -> Processed
+    # 3. Email from unknown sender with required keyword -> Processed as Signal (Keyword trigger)
     res3 = await client.post(
         f"/api/v1/ingest/{integration.id}",
         json={
             "email": {
-                "from": "alerts@datadog.com",
-                "subject": "Datadog Alert: Critical memory leak on auth-gateway"
+                "from": "unknown-monitor@aws.com",
+                "subject": "AWS Emergency Alert: Critical memory leak on auth-gateway"
             }
         }
     )
