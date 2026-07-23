@@ -1,7 +1,11 @@
 import uuid
 from typing import Any
 from fastapi import APIRouter, status, Depends, HTTPException
+from pydantic import BaseModel, Field
 from app.api.deps import DBSessionDep, ActiveOrganizationDep
+from app.db.mongo import get_mongo_db
+from app.ingest.services import IngestService
+from app.integrations.models import Integration
 from app.integrations.schemas import (
     IntegrationCreate,
     IntegrationRead,
@@ -10,6 +14,87 @@ from app.integrations.schemas import (
 from app.integrations.services import IntegrationService
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
+
+class GmailConfigPreviewRequest(BaseModel):
+    allowed_senders: list[str] = Field(default_factory=list)
+    required_keywords: list[str] = Field(default_factory=list)
+    subject_contains: list[str] = Field(default_factory=list)
+    subject_starts_with: list[str] = Field(default_factory=list)
+
+
+@router.get("/gmail/senders-suggestions")
+async def get_gmail_sender_suggestions(
+    org: ActiveOrganizationDep
+) -> Any:
+    """
+    Returns a list of unique recently seen Gmail senders from MongoDB evidence logs.
+    """
+    mongo_db = get_mongo_db()
+    cursor = mongo_db.evidence.find({"type": "gmail"}).sort("created_at", -1).limit(200)
+    docs = await cursor.to_list(length=200)
+    
+    seen_senders = set()
+    for d in docs:
+        author = d.get("author_name")
+        if author:
+            seen_senders.add(author)
+            
+    defaults = ["alerts@datadog.com", "github@github.com", "pagerduty.com", "security@company.com"]
+    for def_sender in defaults:
+        seen_senders.add(def_sender)
+        
+    return {"suggestions": sorted(list(seen_senders))}
+
+
+@router.post("/gmail/preview-filter")
+async def preview_gmail_signal_filter(
+    org: ActiveOrganizationDep,
+    body: GmailConfigPreviewRequest
+) -> Any:
+    """
+    Evaluates candidate Gmail filter configuration against stored evidence in MongoDB.
+    Returns matched vs ignored counts and sample subjects for live preview rendering.
+    """
+    mongo_db = get_mongo_db()
+    cursor = mongo_db.evidence.find({"type": "gmail"}).sort("created_at", -1).limit(100)
+    docs = await cursor.to_list(length=100)
+
+    candidate_integration = Integration(
+        platform="gmail",
+        config={
+            "allowed_senders": body.allowed_senders,
+            "required_keywords": body.required_keywords,
+            "subject_contains": body.subject_contains,
+            "subject_starts_with": body.subject_starts_with
+        }
+    )
+
+    matched_samples = []
+    ignored_samples = []
+
+    for doc in docs:
+        parsed = {
+            "type": "gmail",
+            "summary": doc.get("summary", ""),
+            "author_name": doc.get("author_name", ""),
+            "metadata": doc.get("metadata", {})
+        }
+        is_signal, _ = IngestService.classify_signal(candidate_integration, parsed)
+        sample_title = doc.get("summary", "Untitled Signal")
+        
+        if is_signal:
+            if sample_title not in matched_samples:
+                matched_samples.append(sample_title)
+        else:
+            if sample_title not in ignored_samples:
+                ignored_samples.append(sample_title)
+
+    return {
+        "matched_count": len(matched_samples),
+        "ignored_count": len(ignored_samples),
+        "matched_samples": matched_samples[:5],
+        "ignored_samples": ignored_samples[:5]
+    }
 
 @router.post("/", response_model=IntegrationRead, status_code=status.HTTP_201_CREATED)
 async def connect_new_integration(

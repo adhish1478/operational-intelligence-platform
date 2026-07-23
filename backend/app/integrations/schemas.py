@@ -12,6 +12,7 @@ class IntegrationCreate(IntegrationBase):
 
 class IntegrationUpdate(BaseModel):
     credentials: dict[str, Any] | None = Field(None, description="Optional connection credentials to update")
+    config: dict[str, Any] | None = Field(None, description="Optional configuration dict to update")
     status: Literal["active", "error", "disconnected"] | None = Field(None)
 
 class IntegrationRead(IntegrationBase):
