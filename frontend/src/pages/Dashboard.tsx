@@ -11,9 +11,9 @@ import {
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { mapInvestigation } from '../lib/mappers';
+import { mapInvestigation, mapEvidence } from '../lib/mappers';
 import { useAuthStore } from '../store/authStore';
-import type { Severity, OperationalInvestigation, EntityReference } from '../types';
+import type { Severity, OperationalInvestigation, EntityReference, Evidence } from '../types';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -25,7 +25,13 @@ export const Dashboard: React.FC = () => {
     queryFn: () => api.get('/investigations/')
   });
 
+  const { data: recentEvidence, isLoading: isEvidenceLoading } = useQuery({
+    queryKey: ['recent-evidence'],
+    queryFn: () => api.get('/investigations/evidence/recent')
+  });
+
   const investigations: OperationalInvestigation[] = (rawInvs || []).map(mapInvestigation);
+  const evidenceList: Evidence[] = (recentEvidence || []).map(mapEvidence);
   const activeInvestigations = investigations.filter((inv: OperationalInvestigation) => inv.status !== 'resolved');
 
   const getSeverityBadgeClass = (severity: Severity) => {
@@ -201,21 +207,31 @@ export const Dashboard: React.FC = () => {
         <div className="space-y-3">
           <h3 className="text-headline-sm text-on-surface uppercase tracking-wider text-outline font-bold">Active Signal Stream</h3>
           <div className="bg-surface border border-outline-variant rounded-lg p-4 space-y-3">
-            {[
-              { system: 'slack', text: 'CS Lead posted update in #techcorp-incident', time: '2m ago' },
-              { system: 'github', text: 'Tests passed for hotfix/redis-timeouts (PR #482)', time: '15m ago' },
-              { system: 'jira', text: 'Jira ticket OIP-842 changed status to "In Progress"', time: '22m ago' },
-            ].map((ev, index) => (
-              <div key={index} className="flex items-center justify-between text-body-sm py-1 border-b border-outline-variant/40 last:border-0 last:pb-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-low border border-outline-variant/60 text-on-surface-variant uppercase font-semibold">
-                    {ev.system}
-                  </span>
-                  <span className="text-on-surface text-[12px] truncate max-w-[280px]">{ev.text}</span>
-                </div>
-                <span className="text-mono-label text-outline text-[11px]">{ev.time}</span>
+            {isEvidenceLoading ? (
+              <div className="text-center font-mono text-xs text-on-surface-variant py-4 animate-pulse">
+                Loading telemetry stream...
               </div>
-            ))}
+            ) : evidenceList.length === 0 ? (
+              <div className="text-center font-mono text-xs text-on-surface-variant py-4">
+                No active signals recorded.
+              </div>
+            ) : (
+              evidenceList.map((ev: Evidence) => (
+                <div key={ev.id} className="flex items-center justify-between text-body-sm py-1.5 border-b border-outline-variant/40 last:border-0 last:pb-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-low border border-outline-variant/60 text-on-surface-variant uppercase font-semibold shrink-0">
+                      {ev.type}
+                    </span>
+                    <span className="text-on-surface text-[12px] truncate" title={ev.summary}>
+                      {ev.summary}
+                    </span>
+                  </div>
+                  <span className="text-mono-label text-outline text-[10px] font-mono shrink-0 ml-2">
+                    {new Date(ev.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

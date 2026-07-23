@@ -230,7 +230,7 @@ export const InvestigationDetails: React.FC = () => {
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0 overflow-hidden pb-4">
         
         {/* Pane 1 (Left / 4 Columns): Diagnostic Summary & System Log Feed */}
-        <div className="lg:col-span-4 flex flex-col gap-4 min-h-0">
+        <div className="lg:col-span-4 flex flex-col gap-4 min-h-0 overflow-y-auto pr-1">
           <div className="bg-surface border border-outline-variant rounded-lg p-4 space-y-4 shrink-0">
             <div>
               <h3 className="text-headline-sm text-outline uppercase tracking-wider font-bold mb-1.5">Root Cause Summary</h3>

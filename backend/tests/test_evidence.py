@@ -167,3 +167,54 @@ async def test_evidence_tenant_isolation(client: AsyncClient, db_session: AsyncS
     )
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+async def test_get_recent_evidence(client: AsyncClient, db_session: AsyncSession):
+    # 1. Setup Tenant User, Org, and Investigation
+    user = User(email="recent-stream@org.com", password_hash=hash_password("password"))
+    db_session.add(user)
+    await db_session.commit()
+
+    org = Organization(name="Recent Stream Corp", slug="recent-stream")
+    db_session.add(org)
+    await db_session.flush()
+
+    db_session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+    await db_session.commit()
+
+    inv = Investigation(
+        organization_id=org.id,
+        title="Ingress Firewall Spike",
+        severity="high",
+        status="open"
+    )
+    db_session.add(inv)
+    await db_session.commit()
+
+    # Login
+    login_resp = await client.post("/api/v1/auth/login", json={"email": "recent-stream@org.com", "password": "password"})
+    token = login_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}", "X-Organization-ID": str(org.id)}
+
+    # 2. Add an evidence log
+    evidence_payload = {
+        "type": "github",
+        "summary": "GitHub Commit: Fixed firewall block rule",
+        "author_name": "Dev Bob",
+        "source_url": "https://github.com/repo/commit/bob123",
+        "metadata": {"commit": "bob123"}
+    }
+    post_res = await client.post(
+        f"/api/v1/investigations/{inv.id}/evidence",
+        json=evidence_payload,
+        headers=headers
+    )
+    assert post_res.status_code == 201
+
+    # 3. Query global recent evidence stream
+    get_res = await client.get("/api/v1/investigations/evidence/recent", headers=headers)
+    assert get_res.status_code == 200
+    data = get_res.json()
+    assert len(data) == 1
+    assert data[0]["type"] == "github"
+    assert data[0]["summary"] == "GitHub Commit: Fixed firewall block rule"

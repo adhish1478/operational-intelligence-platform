@@ -1,5 +1,6 @@
 import uuid
 from typing import Any
+from sqlalchemy import select
 from fastapi import APIRouter, status, Depends, HTTPException
 from app.api.deps import DBSessionDep, MongoSessionDep, ActiveOrganizationDep
 from app.investigations.services import InvestigationService
@@ -7,6 +8,49 @@ from app.evidence.schemas import EvidenceCreate, EvidenceRead
 from app.evidence.services import EvidenceService
 
 router = APIRouter(prefix="/investigations", tags=["evidence"])
+
+
+@router.get("/evidence/recent", response_model=list[EvidenceRead])
+async def get_recent_organization_evidence(
+    db: DBSessionDep,
+    mongo_db: MongoSessionDep,
+    org: ActiveOrganizationDep
+) -> Any:
+    """
+    Retrieve the most recent evidence logs across all active investigations for the organization.
+    """
+    from datetime import timezone
+    from app.investigations.models import Investigation
+    
+    # 1. Fetch active investigations for the organization
+    statement = select(Investigation).where(
+        Investigation.organization_id == org.id,
+        Investigation.status.in_(["open", "investigating"])
+    )
+    result = await db.execute(statement)
+    active_invs = result.scalars().all()
+    if not active_invs:
+        return []
+
+    inv_ids = [str(inv.id) for inv in active_invs]
+
+    # 2. Query MongoDB for latest evidence matching these investigations
+    cursor = mongo_db.evidence.find({"investigation_id": {"$in": inv_ids}}).sort("created_at", -1).limit(10)
+    documents = await cursor.to_list(length=10)
+
+    evidence_list = []
+    for doc in documents:
+        doc_id = doc.pop("_id")
+        evidence_list.append(
+            EvidenceRead(
+                id=uuid.UUID(doc_id),
+                investigation_id=uuid.UUID(doc["investigation_id"]),
+                created_at=doc["created_at"].replace(tzinfo=timezone.utc),
+                **{k: v for k, v in doc.items() if k not in ("id", "investigation_id", "created_at")}
+            )
+        )
+    return evidence_list
+
 
 @router.post("/{investigation_id}/evidence", response_model=EvidenceRead, status_code=status.HTTP_201_CREATED)
 async def add_evidence_to_investigation(
