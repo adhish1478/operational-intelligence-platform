@@ -23,6 +23,15 @@ export const InvestigationDetails: React.FC = () => {
   const [commentText, setCommentText] = useState('');
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnoseError, setDiagnoseError] = useState<string | null>(null);
+
+  // Closed loop action states
+  const [sharingSlack, setSharingSlack] = useState(false);
+  const [slackPostedChannel, setSlackPostedChannel] = useState<string | null>(null);
+  const [slackError, setSlackError] = useState<string | null>(null);
+
+  const [escalatingJira, setEscalatingJira] = useState(false);
+  const [jiraTicket, setJiraTicket] = useState<{ key: string; url: string } | null>(null);
+  const [jiraError, setJiraError] = useState<string | null>(null);
   
   const [timelineEvents, setTimelineEvents] = useState([
     { id: '1', type: 'system', text: 'Investigation opened automatically via SysAlert', time: '10:14 AM' },
@@ -88,6 +97,51 @@ export const InvestigationDetails: React.FC = () => {
     setCommentText('');
   };
 
+  const handleShareSlack = async () => {
+    if (!id) return;
+    setSharingSlack(true);
+    setSlackPostedChannel(null);
+    setSlackError(null);
+    try {
+      const resp = await api.post(`/investigations/${id}/share-slack`);
+      setSlackPostedChannel(resp.channel || '#alerts');
+      const slackEvt = {
+        id: Date.now().toString(),
+        type: 'escalation',
+        text: `Shared AI Diagnosis report to Slack channel ${resp.channel || '#alerts'}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setTimelineEvents(prev => [...prev, slackEvt]);
+    } catch (err: any) {
+      setSlackError(err.response?.data?.detail || err.message || 'Failed to share to Slack.');
+    } finally {
+      setSharingSlack(false);
+    }
+  };
+
+  const handleEscalateJira = async () => {
+    if (!id) return;
+    setEscalatingJira(true);
+    setJiraTicket(null);
+    setJiraError(null);
+    try {
+      const resp = await api.post(`/investigations/${id}/escalate-jira`);
+      setJiraTicket({ key: resp.key, url: resp.url });
+      const jiraEvt = {
+        id: Date.now().toString(),
+        type: 'escalation',
+        text: `Escalated incident to Jira ticket ${resp.key}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setTimelineEvents(prev => [...prev, jiraEvt]);
+      await refetchInv();
+    } catch (err: any) {
+      setJiraError(err.response?.data?.detail || err.message || 'Failed to escalate to Jira.');
+    } finally {
+      setEscalatingJira(false);
+    }
+  };
+
   const getSeverityBadgeClass = (severity: Severity) => {
     switch (severity) {
       case 'critical': return 'badge-critical';
@@ -104,6 +158,7 @@ export const InvestigationDetails: React.FC = () => {
       case 'github': return <GitCommit className="w-4.5 h-4.5 text-secondary shrink-0" />;
       case 'jira': return <CheckCircle className="w-4.5 h-4.5 text-secondary shrink-0" />;
       case 'email': return <Mail className="w-4.5 h-4.5 text-secondary shrink-0" />;
+      case 'gmail': return <Mail className="w-4.5 h-4.5 text-secondary shrink-0" />;
       case 'alert': return <CheckCircle className="w-4.5 h-4.5 text-red-500 shrink-0" />;
       default: return <FileText className="w-4.5 h-4.5 text-secondary shrink-0" />;
     }
@@ -182,11 +237,57 @@ export const InvestigationDetails: React.FC = () => {
               <p className="text-body-sm text-on-surface">{investigation.description || 'Awaiting description analysis.'}</p>
             </div>
 
-            <div className="bg-error-container/40 border border-error/20 rounded p-3">
-              <h4 className="text-body-sm font-semibold text-error flex items-center gap-1.5 mb-1">
-                <span>Suggested Remediation</span>
-              </h4>
-              <p className="text-body-sm text-on-surface">{investigation.suggestedAction || 'No remediation suggested yet. Run AI Diagnostics above.'}</p>
+            <div className="bg-error-container/40 border border-error/20 rounded p-3 space-y-3">
+              <div>
+                <h4 className="text-body-sm font-semibold text-error flex items-center gap-1.5 mb-1">
+                  <span>Suggested Remediation</span>
+                </h4>
+                <p className="text-body-sm text-on-surface whitespace-pre-line">{investigation.suggestedAction || 'No remediation suggested yet. Run AI Diagnostics above.'}</p>
+              </div>
+
+              {investigation.suggestedAction && (
+                <div className="pt-2.5 border-t border-outline-variant/40 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleShareSlack}
+                    disabled={sharingSlack || !!slackPostedChannel}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded bg-[#4A154B] hover:bg-[#3b113c] text-white transition-colors disabled:opacity-60"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>
+                      {sharingSlack ? 'Sharing...' : slackPostedChannel ? `Shared to ${slackPostedChannel}` : 'Share to Slack'}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={handleEscalateJira}
+                    disabled={escalatingJira || !!jiraTicket}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded bg-[#0052CC] hover:bg-[#0041a3] text-white transition-colors disabled:opacity-60"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    <span>
+                      {escalatingJira ? 'Escalating...' : jiraTicket ? `Escalated: ${jiraTicket.key}` : 'Escalate to Jira'}
+                    </span>
+                  </button>
+
+                  {jiraTicket && (
+                    <a
+                      href={jiraTicket.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-0.5 text-[11px] font-semibold text-primary hover:underline ml-1"
+                    >
+                      <span>View Ticket</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {(slackError || jiraError) && (
+                <p className="text-[10px] text-error font-mono leading-tight">
+                  Error: {slackError || jiraError}
+                </p>
+              )}
             </div>
           </div>
 

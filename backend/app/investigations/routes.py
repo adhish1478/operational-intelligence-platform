@@ -1,5 +1,6 @@
 import uuid
 from typing import Any
+from sqlalchemy import select
 from fastapi import status, APIRouter, Depends, HTTPException
 from app.api.deps import DBSessionDep, ActiveOrganizationDep, MongoSessionDep, CurrentUserDep
 from app.investigations.schemas import (
@@ -86,3 +87,206 @@ async def run_investigation_diagnosis(
     return await DiagnosisService.generate_diagnosis_report(
         db, mongo_db, investigation, current_user.id
     )
+
+
+@router.post('/{id}/share-slack')
+async def share_investigation_to_slack(
+    db: DBSessionDep,
+    org: ActiveOrganizationDep,
+    id: uuid.UUID
+) -> Any:
+    """
+    Share the latest AI Diagnosis report directly to the configured Slack triage channel.
+    """
+    # 1. Fetch investigation and check tenant
+    investigation = await InvestigationService.get_investigation_by_id(db, id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="investigation not found")
+    if investigation.organization_id != org.id:
+        raise HTTPException(status_code=403, detail="Forbidden: Result belongs to another tenant")
+
+    # 2. Fetch the latest diagnosis report summary
+    from sqlalchemy import desc
+    from app.investigations.models import Diagnosis
+    diag_statement = select(Diagnosis).where(Diagnosis.investigation_id == id).order_by(desc(Diagnosis.created_at))
+    diag_res = await db.execute(diag_statement)
+    latest_diagnosis = diag_res.scalars().first()
+    if not latest_diagnosis:
+        raise HTTPException(status_code=400, detail="Please run AI Diagnosis first before sharing.")
+
+    # 3. Retrieve Slack active integration
+    from app.integrations.models import Integration
+    from app.core.security import decrypt_credentials
+    int_statement = select(Integration).where(
+        Integration.organization_id == org.id,
+        Integration.platform == "slack",
+        Integration.status == "active"
+    )
+    int_res = await db.execute(int_statement)
+    integration = int_res.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=400, detail="Slack integration not connected or active.")
+
+    # 4. Decrypt bot token and read channel configuration
+    try:
+        creds = decrypt_credentials(integration.credentials_encrypted)
+        slack_token = creds.get("access_token")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to decrypt Slack credentials: {str(e)}")
+
+    if not slack_token:
+        raise HTTPException(status_code=400, detail="Missing Slack bot credentials.")
+
+    channel_id = integration.config.get("channel_id")
+    channel_name = integration.config.get("channel_name", "#alerts")
+    if not channel_id:
+        raise HTTPException(status_code=400, detail="No Slack triage channel configured.")
+
+    # 5. POST to Slack chat.postMessage
+    import httpx
+    text_content = (
+        f"🚨 *Incident Escalation Alert: {investigation.title}*\n"
+        f"Severity: `{investigation.severity.upper()}` | Status: `{investigation.status.upper()}`\n\n"
+        f"*AI Diagnosis & Root Cause Summary:*\n"
+        f"{latest_diagnosis.report_summary}\n"
+    )
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            response = await client.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {slack_token}"},
+                json={"channel": channel_id, "text": text_content}
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Slack request failed: {str(e)}")
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"Slack returned HTTP error: {response.text}")
+
+    slack_res = response.json()
+    if not slack_res.get("ok"):
+        raise HTTPException(status_code=400, detail=f"Slack API error: {slack_res.get('error')}")
+
+    return {"status": "success", "channel": channel_name}
+
+
+@router.post('/{id}/escalate-jira')
+async def escalate_investigation_to_jira(
+    db: DBSessionDep,
+    org: ActiveOrganizationDep,
+    id: uuid.UUID
+) -> Any:
+    """
+    Create a task issue on Jira Cloud representing this investigation,
+    attaching the latest AI Diagnosis report as the ticket description.
+    """
+    # 1. Fetch investigation and check tenant
+    investigation = await InvestigationService.get_investigation_by_id(db, id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="investigation not found")
+    if investigation.organization_id != org.id:
+        raise HTTPException(status_code=403, detail="Forbidden: Result belongs to another tenant")
+
+    # 2. Fetch the latest diagnosis report summary
+    from sqlalchemy import desc
+    from app.investigations.models import Diagnosis
+    diag_statement = select(Diagnosis).where(Diagnosis.investigation_id == id).order_by(desc(Diagnosis.created_at))
+    diag_res = await db.execute(diag_statement)
+    latest_diagnosis = diag_res.scalars().first()
+    if not latest_diagnosis:
+        raise HTTPException(status_code=400, detail="Please run AI Diagnosis first before escalating.")
+
+    # 3. Retrieve Jira active integration
+    from app.integrations.models import Integration
+    from app.core.security import decrypt_credentials
+    int_statement = select(Integration).where(
+        Integration.organization_id == org.id,
+        Integration.platform == "jira",
+        Integration.status == "active"
+    )
+    int_res = await db.execute(int_statement)
+    integration = int_res.scalar_one_or_none()
+    if not integration:
+        raise HTTPException(status_code=400, detail="Jira integration not connected or active.")
+
+    # 4. Decrypt credentials and load config project
+    try:
+        creds = decrypt_credentials(integration.credentials_encrypted)
+        host_url = creds.get("host_url")
+        email = creds.get("email")
+        api_token = creds.get("api_token")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to decrypt Jira credentials: {str(e)}")
+
+    if not host_url or not email or not api_token:
+        raise HTTPException(status_code=400, detail="Missing Jira connection credentials.")
+
+    project_list = integration.config.get("tracked_projects", [])
+    project_key = project_list[0] if project_list else "PROD"
+
+    # 5. POST to Jira issue creation endpoint (/rest/api/3/issue)
+    import httpx
+    jira_payload = {
+        "fields": {
+            "project": {
+                "key": project_key
+            },
+            "summary": f"[OIP Alert] {investigation.title}",
+            "description": {
+                "type": "doc",
+                "version": 1,
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"Operational incident escalated from OIP.\n\n"
+                                    f"AI Diagnosis Report:\n{latest_diagnosis.report_summary}"
+                                )
+                            }
+                        ]
+                    }
+                ]
+            },
+            "issuetype": {
+                "name": "Task"
+            }
+        }
+    }
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            response = await client.post(
+                f"{host_url}/rest/api/3/issue",
+                headers={"Content-Type": "application/json"},
+                auth=(email, api_token),
+                json=jira_payload
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Jira request failed: {str(e)}")
+
+    if response.status_code != 201:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Jira issue creation failed (status {response.status_code}): {response.text}"
+        )
+
+    res_data = response.json()
+    key = res_data.get("key", "UNKNOWN-KEY")
+    ticket_url = f"{host_url}/browse/{key}"
+
+    # 6. Append Jira ticket key reference back to the investigation suggestion_action for persistence
+    esc_suffix = f"\n\n[Escalated to Jira ticket: {key}]"
+    if not investigation.suggestion_action:
+        investigation.suggestion_action = esc_suffix.strip()
+    elif esc_suffix not in investigation.suggestion_action:
+        investigation.suggestion_action += esc_suffix
+
+    db.add(investigation)
+    await db.commit()
+    await db.refresh(investigation)
+
+    return {"status": "success", "key": key, "url": ticket_url}
