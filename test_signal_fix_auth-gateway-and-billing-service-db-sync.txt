@@ -1,1 +1,0 @@
-Test trigger for fix/auth-gateway-and-billing-service-db-sync
