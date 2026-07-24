@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     GITHUB_CLIENT_ID: str | None = None
     GITHUB_CLIENT_SECRET: str | None = None
     GITHUB_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/github/callback"
+    WEBHOOK_BASE_URL: str | None = None
 
     # Slacl OAuth Settings
     SLACK_CLIENT_ID: str | None = None

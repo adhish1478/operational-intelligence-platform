@@ -9,6 +9,7 @@ from app.integrations.models import Integration
 from app.investigations.models import Investigation
 from app.evidence.schemas import EvidenceCreate
 from app.evidence.services import EvidenceService
+from app.core.config import settings
 
 
 class IngestService:
@@ -44,6 +45,12 @@ class IngestService:
 
         # 1. Microservice / Pod Identifiers (hyphenated names containing lowercase letters/numbers)
         services = set(re.findall(r'\b[a-z0-9]+(?:-[a-z0-9]+)+\b', text.lower()))
+
+        # Git branch patterns (e.g. fix/auth-gateway-oom -> auth-gateway)
+        branch_matches = re.findall(r'(?:fix|hotfix|bugfix|feature|incident)/([a-z0-9-]+)', text.lower())
+        for bm in branch_matches:
+            sub_services = set(re.findall(r'\b[a-z0-9]+(?:-[a-z0-9]+)+\b', bm))
+            services = services.union(sub_services)
 
         # 2. Error Codes & Exception Class Names (HTTP 5xx/4xx codes, or Java/Python Exception names)
         error_codes = set(re.findall(r'\b[45]\d\d\b', text))
@@ -153,6 +160,132 @@ class IngestService:
         return float(final_score)
 
     @staticmethod
+    async def generate_embedding(text: str) -> list[float] | None:
+        """
+        Phase 2 - Step 1: Text Embedding Generator.
+        Calls OpenAI text-embedding-3-small API to generate a 1536-dimensional vector.
+        Returns None gracefully if OPENAI_API_KEY is not configured or request fails.
+        """
+        if not text or not settings.OPENAI_API_KEY:
+            return None
+
+        clean_text = text.replace("\n", " ").strip()
+        if not clean_text:
+            return None
+
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    "https://api.openai.com/v1/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "input": clean_text[:2000],
+                        "model": "text-embedding-3-small"
+                    }
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    embedding = data.get("data", [{}])[0].get("embedding")
+                    if isinstance(embedding, list):
+                        return [float(v) for v in embedding]
+        except Exception:
+            pass
+
+        return None
+
+    @staticmethod
+    def cosine_similarity(vec_a: list[float] | None, vec_b: list[float] | None) -> float:
+        """
+        Phase 2 - Step 2: Cosine Similarity Calculator.
+        Computes cosine similarity between two vector embeddings.
+        Returns float between 0.0 and 1.0.
+        """
+        if not vec_a or not vec_b or len(vec_a) != len(vec_b):
+            return 0.0
+
+        import math
+        dot_product = sum(a * b for a, b in zip(vec_a, vec_b))
+        norm_a = math.sqrt(sum(a * a for a in vec_a))
+        norm_b = math.sqrt(sum(b * b for b in vec_b))
+
+        if norm_a == 0.0 or norm_b == 0.0:
+            return 0.0
+
+        similarity = dot_product / (norm_a * norm_b)
+        # Normalize to 0.0 - 1.0 range
+        return float(max(min(similarity, 1.0), 0.0))
+
+    @staticmethod
+    async def get_investigation_vector(
+        investigation: Investigation, mongo_db: AsyncIOMotorDatabase
+    ) -> list[float] | None:
+        """
+        Phase 2 - Step 3: Investigation Vector Centroid Builder.
+        Generates 1536-dimensional vector embedding for an investigation's composite fingerprint.
+        """
+        fingerprint = await IngestService.build_investigation_fingerprint(investigation, mongo_db)
+        return await IngestService.generate_embedding(fingerprint)
+
+    @staticmethod
+    def score_hybrid_correlation(
+        incoming_text: str,
+        investigation_fingerprint: str,
+        detected_at: datetime | None,
+        inc_vector: list[float] | None = None,
+        inv_vector: list[float] | None = None
+    ) -> float:
+        """
+        Phase 2 - Step 4: Hybrid Correlation Scorer.
+        Combines Entity Match (40%), Vector Cosine Similarity (40%),
+        and Keyword Overlap (20%) multiplied by Time Decay.
+        Falls back to Phase 1 scoring if vector embeddings are unavailable.
+        """
+        # If vector embeddings are unavailable, fallback to Phase 1 scoring
+        if inc_vector is None or inv_vector is None:
+            return IngestService.score_correlation(incoming_text, investigation_fingerprint, detected_at)
+
+        if not incoming_text or not investigation_fingerprint:
+            return 0.0
+
+        # 1. Entity Extraction Comparison (40% Weight)
+        inc_entities = IngestService.extract_entities(incoming_text)
+        inv_entities = IngestService.extract_entities(investigation_fingerprint)
+
+        entity_score = 0.0
+        if inc_entities["services"].intersection(inv_entities["services"]):
+            entity_score += 0.60
+        if inc_entities["errors"].intersection(inv_entities["errors"]):
+            entity_score += 0.25
+        if inc_entities["alert_ids"].intersection(inv_entities["alert_ids"]):
+            entity_score += 0.15
+        entity_score = min(entity_score, 1.0)
+
+        # 2. Vector Cosine Similarity (40% Weight)
+        vector_score = IngestService.cosine_similarity(inc_vector, inv_vector)
+
+        # 3. Keyword Jaccard Similarity (20% Weight)
+        inc_keywords = IngestService.extract_keywords(incoming_text)
+        inv_keywords = IngestService.extract_keywords(investigation_fingerprint)
+        keyword_score = 0.0
+        if inc_keywords and inv_keywords:
+            intersection = len(inc_keywords.intersection(inv_keywords))
+            union = len(inc_keywords.union(inv_keywords))
+            keyword_score = intersection / union if union > 0 else 0.0
+
+        # 4. Exponential Time Decay
+        time_decay = IngestService.compute_time_decay(detected_at)
+
+        # 5. Composite Hybrid Score
+        base_score = (entity_score * 0.40) + (vector_score * 0.40) + (keyword_score * 0.20)
+        final_score = base_score * time_decay
+
+        return float(final_score)
+
+    @staticmethod
     def platform_filter(integration: Integration, raw_payload: dict[str, Any]) -> tuple[bool, str | None]:
         """
         Stage 1: Platform Filter.
@@ -199,15 +332,83 @@ class IngestService:
             author_name = event.get("user")
             
         elif platform == "github":
-            commit = payload.get("head_commit", {})
-            if commit:
-                msg = commit.get("message", "")
-                summary = f"{msg[:100]}..." if len(msg) > 100 else msg
-                author_name = commit.get("author", {}).get("username") or commit.get("author", {}).get("name")
-                source_url = commit.get("url")
+            # 1. Pull Request Event
+            pr = payload.get("pull_request", {})
+            if pr:
+                pr_title = pr.get("title", "No PR Title")
+                branch = pr.get("head", {}).get("ref", "")
+                action = payload.get("action", "updated")
+                merged = pr.get("merged", False)
+                pr_state = "merged" if merged else action
+
+                summary = f"GitHub PR ({pr_state}): [{branch}] {pr_title}"
+                author_name = pr.get("user", {}).get("login")
+                source_url = pr.get("html_url")
+                metadata = {
+                    "event_type": "pull_request",
+                    "action": pr_state,
+                    "title": pr_title,
+                    "branch": branch,
+                    "base_branch": pr.get("base", {}).get("ref", ""),
+                    "body": pr.get("body") or pr_title,
+                    "repo": payload.get("repository", {}).get("full_name", "")
+                }
+            # 2. Workflow Run / CI Build Event
+            elif "workflow_run" in payload:
+                wf = payload.get("workflow_run", {})
+                wf_name = wf.get("name", "Workflow")
+                conclusion = wf.get("conclusion") or wf.get("status", "unknown")
+                head_branch = wf.get("head_branch", "")
+
+                summary = f"GitHub CI ({conclusion}): {wf_name} on branch {head_branch}"
+                author_name = wf.get("actor", {}).get("login")
+                source_url = wf.get("html_url")
+                metadata = {
+                    "event_type": "workflow_run",
+                    "conclusion": conclusion,
+                    "workflow": wf_name,
+                    "branch": head_branch,
+                    "body": f"Workflow run {wf_name} status: {conclusion} on branch {head_branch}",
+                    "repo": payload.get("repository", {}).get("full_name", "")
+                }
+            # 3. Issue Event
+            elif "issue" in payload:
+                issue = payload.get("issue", {})
+                issue_title = issue.get("title", "No Issue Title")
+                number = issue.get("number")
+                labels = [l.get("name") for l in issue.get("labels", []) if isinstance(l, dict)]
+
+                summary = f"GitHub Issue #{number}: {issue_title}"
+                author_name = issue.get("user", {}).get("login")
+                source_url = issue.get("html_url")
+                metadata = {
+                    "event_type": "issues",
+                    "number": number,
+                    "title": issue_title,
+                    "labels": labels,
+                    "body": issue.get("body") or issue_title,
+                    "repo": payload.get("repository", {}).get("full_name", "")
+                }
+            # 4. Push / Commit Event
             else:
-                repo_name = payload.get("repository", {}).get("full_name", "Unknown Repo")
-                summary = f"GitHub Event on repository: {repo_name}"
+                commit = payload.get("head_commit", {})
+                ref = payload.get("ref", "")
+                branch = ref.replace("refs/heads/", "") if ref else "main"
+                if commit:
+                    msg = commit.get("message", "")
+                    summary = f"GitHub Push [{branch}]: {msg[:80]}"
+                    author_name = commit.get("author", {}).get("username") or commit.get("author", {}).get("name")
+                    source_url = commit.get("url")
+                    metadata = {
+                        "event_type": "push",
+                        "branch": branch,
+                        "commit_msg": msg,
+                        "body": msg,
+                        "repo": payload.get("repository", {}).get("full_name", "")
+                    }
+                else:
+                    repo_name = payload.get("repository", {}).get("full_name", "Unknown Repo")
+                    summary = f"GitHub Event on repository: {repo_name}"
 
         elif platform == "jira":
             issue = payload.get("issue", {})
@@ -259,6 +460,16 @@ class IngestService:
         metadata = parsed.get("metadata") or {}
         full_text = f"{summary} {str(metadata)}".lower()
 
+        # GitHub Noise Filtering: Filter out Dependabot, chore/docs branches, and redundant push-to-PR-branch events
+        if parsed.get("type") == "github":
+            branch = str(metadata.get("branch") or "").lower()
+            event_type = metadata.get("event_type")
+            if "dependabot" in author or any(branch.startswith(prefix) for prefix in ["chore/", "docs/", "style/", "renovate/"]):
+                return False, f"Filtered out GitHub background noise ({author} on {branch})."
+            # Push events to non-default branches are redundant (the PR event already captures them)
+            if event_type == "push" and branch not in ["main", "master", "develop", "production"]:
+                return False, f"Filtered redundant push to PR branch ({branch})."
+
         allowed_senders = [s.lower() for s in config.get("allowed_senders", []) if s and s.strip()]
         required_keywords = [k.lower() for k in config.get("required_keywords", []) if k and k.strip()]
         subject_contains = [sc.lower() for sc in config.get("subject_contains", []) if sc and sc.strip()]
@@ -302,9 +513,9 @@ class IngestService:
         incoming_text: str
     ) -> Investigation | None:
         """
-        Stage 4: Advanced Correlation Engine (Phase 1).
+        Stage 4: Advanced Correlation Engine (Phase 2 Hybrid Model).
         Finds an active Investigation container with highest weighted correlation score
-        combining Entity Extraction, Composite Fingerprints, Keyword Similarity, and Time Decay.
+        combining Entity Extraction, Vector Embeddings (or Phase 1 fallback), Keyword Similarity, and Time Decay.
         """
         if not incoming_text:
             return None
@@ -316,12 +527,26 @@ class IngestService:
         result = await db.execute(statement)
         active_investigations = result.scalars().all()
 
+        if not active_investigations:
+            return None
+
+        # Generate incoming signal vector embedding if OPENAI_API_KEY is configured
+        inc_vector = await IngestService.generate_embedding(incoming_text)
+
         best_match = None
         best_score = 0.0
 
         for inv in active_investigations:
             fingerprint = await IngestService.build_investigation_fingerprint(inv, mongo_db)
-            score = IngestService.score_correlation(incoming_text, fingerprint, inv.detected_at)
+            inv_vector = await IngestService.generate_embedding(fingerprint) if inc_vector else None
+
+            score = IngestService.score_hybrid_correlation(
+                incoming_text=incoming_text,
+                investigation_fingerprint=fingerprint,
+                detected_at=inv.detected_at,
+                inc_vector=inc_vector,
+                inv_vector=inv_vector
+            )
 
             # Minimum correlation confidence threshold (0.25)
             if score >= 0.25 and score > best_score:
@@ -341,6 +566,31 @@ class IngestService:
         metadata_str = str(parsed.get("metadata") or {}).lower()
         full_text = f"{summary} {metadata_str}"
         config = integration.config or {}
+
+        # GitHub Conservative Routing Rules:
+        # CI workflow failures, P0/bug-labeled issues, or PRs on incident branches with critical keywords spawn NEW Investigations.
+        # Regular PRs/commits that don't match an active investigation go to standalone evidence.
+        if integration.platform == "github":
+            metadata = parsed.get("metadata") or {}
+            event_type = metadata.get("event_type")
+            conclusion = str(metadata.get("conclusion") or "").lower()
+            labels = [str(l).lower() for l in (metadata.get("labels") or [])]
+            branch = str(metadata.get("branch") or "").lower()
+
+            if event_type == "workflow_run" and conclusion in ["failure", "cancelled", "timed_out"]:
+                return True
+            if event_type == "issues" and any(l in labels for l in ["bug", "p0", "critical", "blocker"]):
+                return True
+            # PRs on incident-relevant branches (bug/*, hotfix/*, incident/*) with critical keywords -> incident-worthy
+            if event_type == "pull_request":
+                incident_branches = ["bug/", "hotfix/", "bugfix/", "incident/"]
+                incident_keywords = {"critical", "outage", "error", "failed", "failure", "leak", "crash", "panic", "fatal", "p0", "p1"}
+                if any(branch.startswith(prefix) for prefix in incident_branches):
+                    pr_text_words = set(re.findall(r'\b[a-zA-Z]{2,}\b', full_text))
+                    if pr_text_words.intersection(incident_keywords):
+                        return True
+            # Otherwise, regular PRs/pushes that didn't correlate are stored as Standalone Evidence
+            return False
 
         # 1. User-configured rule matches (required_keywords, subject_contains, subject_starts_with)
         required_keywords = [k.lower() for k in config.get("required_keywords", []) if k and k.strip()]

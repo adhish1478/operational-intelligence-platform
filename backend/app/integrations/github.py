@@ -7,11 +7,14 @@ import httpx
 from sqlalchemy import select
 from pydantic import BaseModel
 
+import logging
 from app.core.config import settings
 from app.core.security import decode_token, encrypt_credentials
 from app.api.deps import DBSessionDep
 from app.auth.services import AuthService
 from app.integrations.models import Integration
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/github", tags=["integrations"])
 
@@ -36,7 +39,7 @@ async def github_authorize(token: str):
         f"https://github.com/login/oauth/authorize"
         f"?client_id={settings.GITHUB_CLIENT_ID}"
         f"&redirect_uri={settings.GITHUB_REDIRECT_URI}"
-        f"&scope=repo,read:org"
+        f"&scope=repo,admin:repo_hook,read:org"
         f"&state={token}"
     )
     return RedirectResponse(url=github_url)
@@ -226,10 +229,58 @@ async def update_tracked_repositories(
     # 2. Update the config JSONB column directly
     new_config = dict(integration.config or {})
     new_config["tracked_repos"] = payload.repos
-    
-    # 3. Save and commit changes
+
+    # 3. Decrypt credentials to get access_token for automatic GitHub API webhook registration
+    from app.core.security import decrypt_credentials
+    access_token = None
+    try:
+        creds = decrypt_credentials(integration.credentials_encrypted)
+        access_token = creds.get("access_token")
+    except Exception:
+        pass
+
+    # Construct public target webhook URL
+    base_url = settings.WEBHOOK_BASE_URL or "http://localhost:8000"
+    webhook_target_url = f"{base_url.rstrip('/')}{settings.API_V1_STR}/ingest/{integration.id}"
+
+    # 4. Automatically register GitHub Webhooks via GitHub REST API if access_token is present
+    registered_webhooks = []
+    if access_token:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for repo_slug in payload.repos:
+                try:
+                    hook_resp = await client.post(
+                        f"https://api.github.com/repos/{repo_slug}/hooks",
+                        headers={
+                            "Authorization": f"token {access_token}",
+                            "Accept": "application/vnd.github+json",
+                            "User-Agent": "Sigint-AI-Platform"
+                        },
+                        json={
+                            "name": "web",
+                            "active": True,
+                            "events": ["pull_request", "workflow_run", "issues", "push"],
+                            "config": {
+                                "url": webhook_target_url,
+                                "content_type": "json",
+                                "insecure_ssl": "0"
+                            }
+                        }
+                    )
+                    logger.info(f"GitHub Webhook API registration for {repo_slug} [{webhook_target_url}]: Status {hook_resp.status_code} - {hook_resp.text}")
+                    if hook_resp.status_code in [201, 422]:  # 201 Created or 422 Already Exists
+                        registered_webhooks.append(repo_slug)
+                except Exception as hook_err:
+                    logger.error(f"Failed to register GitHub webhook for {repo_slug}: {hook_err}")
+
+    # 5. Save and commit changes
     integration.config = new_config
     db.add(integration)
     await db.commit()
-    
-    return {"status": "success", "config": new_config}
+
+    return {
+        "status": "success",
+        "config": new_config,
+        "webhook_target_url": webhook_target_url,
+        "registered_webhooks": registered_webhooks
+    }

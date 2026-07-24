@@ -1,208 +1,351 @@
-# Operational Intelligence Platform (Sigint AI): Complete Technical Specification & Architecture Blueprint
-
-This document provides a comprehensive, end-to-end technical reference for the **Operational Intelligence Platform (OIP)**. It is authored specifically to allow system architects and technical leads to audit the system, verify implementation details, understand the exact data flows, and review completed capabilities versus pending roadmap items.
-
----
-
-## 1. System Vision & Core Value Proposition
-
-The **Operational Intelligence Platform (OIP)** is an enterprise-grade, AI-powered incident diagnosis and operational triage assistant. It addresses **alert fatigue** and **context-switching overhead** by:
-1. **Multi-Platform Ingestion**: Aggregating raw telemetry from **GitHub**, **Slack**, **Gmail**, and **Jira**.
-2. **Deterministic Processing**: Filtering out operational noise and routing valid signals through keyword correlation engines.
-3. **Standalone Evidence vs. Incident Containers**: Separating routine observability logs (Evidence in MongoDB) from actionable incident tickets (Investigations in PostgreSQL).
-4. **AI Forensics**: Synthesizing chronological evidence feeds using LLM analysis (OpenAI GPT-4o) to produce root cause summaries and remediation plans.
-5. **Closed-Loop Operations**: Enabling one-click escalation from the UI directly to Slack triage channels (`POST /share-slack`) and Jira Cloud project boards (`POST /escalate-jira`).
+# 📐 Operational Intelligence Platform (Sigint AI / AGY)
+## Master System Architecture & Technical Specification Reference
 
 ---
 
-## 2. Full Architecture & Ingestion Data Pipeline
+## 🏛️ 1. Executive Summary & Core Mission
 
-```mermaid
-graph TD
-    A[Incoming Telemetry Payload: GitHub / Slack / Gmail / Jira] --> B[1. Platform Filter]
-    B -- Failed Boundary Check --> C[REJECT: status=ignored]
-    B -- Passed Check --> D[2. Payload Normalization]
-    
-    D --> E[3. Signal / Noise Classifier]
-    E -- Classified Noise --> F[REJECT: status=ignored]
-    E -- Classified Signal --> G[4. Keyword Correlation Engine]
-    
-    G -- Matched Active SQL Investigation --> H[Attach Evidence to SQL Investigation in MongoDB]
-    G -- No Match Found --> I[5. Is Incident-Worthy?]
-    
-    I -- No: Routine Signal --> J[Store as Standalone Evidence in MongoDB: status=evidence_only]
-    I -- Yes: Operational Incident --> K[Instantiate New SQL Investigation Container in PostgreSQL: status=created]
-    K --> L[Attach Evidence to New Investigation in MongoDB]
-```
+The **Operational Intelligence Platform (Sigint AI)** is an enterprise operational intelligence and incident triage platform built to eliminate operational signal overload. Modern software teams receive thousands of incoming telemetry events daily across disparate platforms (**Gmail**, **Slack**, **GitHub**, **Jira**, **Sentry**, **Datadog**, **PagerDuty**).
 
-### 2.1. Ingestion Pipeline Stages (`app/ingest/services.py`)
+### The Core Problem:
+Without an intelligent signal processing architecture:
+1. Every raw email, commit notification, or alert floods the incident queue, causing severe alert fatigue.
+2. Unrelated events get mistakenly grouped into a single ticket due to superficial word overlaps (e.g. matching generic words like `gateway` or `service`).
+3. Related events from different platforms (e.g. a Datadog alert, a Sentry OOM exception, and a PagerDuty notification) fail to correlate because they use different terminology across different channels.
 
-#### Stage 1: Platform Boundary Filter (`platform_filter`)
-Verifies incoming events against tenant integration configuration settings stored in PostgreSQL (`integration.config`):
-* **GitHub**: Validates repository `full_name` against `config.tracked_repos`.
-* **Slack**: Validates event channel against `config.channel_id`.
-* **Jira**: Validates issue project key against `config.tracked_projects`.
-* *Result if rejected*: `{"status": "ignored", "reason": "..."}`
-
-#### Stage 2: Payload Normalization (`normalize_payload`)
-Transforms heterogeneous vendor JSON payloads into a standardized internal representation:
-* Extracts `type` (`slack`, `github`, `jira`, `gmail`), `summary` (clean title/subject without noisy prefixes), `author_name`, `source_url`, and `metadata`.
-
-#### Stage 3: Deterministic Signal / Noise Classifier (`classify_signal`)
-Rule-based, deterministic classifier evaluating configuration parameters. **No LLM is used**:
-* **Allowed Senders (`allowed_senders`)**: Checks sender email/username against whitelist (e.g. `["alerts@datadog.com", "sentry.io", "github.com", "pagerduty.com"]`).
-* **Required Keywords (`required_keywords`)**: Verifies subject/text contains required operational keywords (`["critical", "incident", "error", "failed", "outage"]`).
-* **Subject Filters (`subject_filters`)**: Evaluates subject substrings.
-* **Trivial Content Filter**: Drops empty or placeholder messages.
-* *Result if classified as noise*: `{"status": "ignored", "reason": "..."}`
-
-#### Stage 4: Token Correlation Engine (`correlate_signal`)
-Tokenizes text using regex (`re.findall(r'\b[a-zA-Z]{3,}\b')`), filters out stop-words, and computes set intersection overlap against all active SQL `Investigation` containers (`status in ('open', 'investigating')`) for the active tenant:
-* *Match Found*: Attaches evidence log to existing investigation container in MongoDB. Returns `{"status": "correlated", "investigation_id": ...}`.
-
-#### Stage 5: Incident-Worthiness Evaluation & Storage Routing (`is_incident_worthy`)
-When correlation fails to match an existing open investigation, the signal is evaluated for incident-worthiness:
-* **Incident-Worthy Criteria**: Summary or metadata contains high-impact operational keywords (`critical`, `outage`, `error`, `failed`, `spiked`, `leak`, `exception`, `down`, `breach`, `emergency`, `timeout`, `panic`) or high/critical priority metadata tags.
-* *If NOT Incident-Worthy*: Saved as **Standalone Evidence Only** in MongoDB (`investigation_id = null`). **Zero SQL database pollution**. Returns `{"status": "evidence_only"}`.
-* *If Incident-Worthy*: Instantiates a new PostgreSQL `Investigation` container with auto-computed severity (`critical`, `high`, `medium`), and attaches the evidence log in MongoDB. Returns `{"status": "created", "investigation_id": ...}`.
+### The Solution:
+Our platform introduces a **5-Stage Ingestion Pipeline** powered by a **Multi-Phase Hybrid Correlation Engine** and a **Polyglot Persistence Model**. It filters noise, correlates cross-platform telemetry into active incident containers with high mathematical precision, and routes routine events into standalone evidence without polluting the operational incident dashboard.
 
 ---
 
-## 3. Dual Polyglot Database Architecture & Test Isolation
+## 💻 2. Technology Stack & Architectural Overview
 
-The platform uses a hybrid storage model to handle relational tenant data and high-volume unstructured telemetry separately.
+| Layer | Technology | Purpose |
+|---|---|---|
+| **Backend Framework** | **FastAPI (Python 3.11)** | High-performance asynchronous API & background worker processing |
+| **Relational DB** | **PostgreSQL (SQLAlchemy 2.0 Async)** | Stores tenant organizations, user accounts, integration configs, and **`Investigations`** |
+| **Document DB** | **MongoDB (Motor / PyMongo Async)** | Stores unstructured **`Evidence`** telemetry documents |
+| **Frontend Framework** | **React 18 + TypeScript + Vite** | Single Page Application (SPA) with strong type safety |
+| **State & Query** | **TanStack Query v5 + Zustand** | In-memory server cache management, optimistic updates, and global auth state |
+| **Styling & UI** | **Tailwind CSS + Lucide Icons** | Linear / Palantir-inspired high-density operational light design system |
+| **Security & Crypto** | **Fernet (Cryptography) + PyJWT** | AES-128-CBC credential encryption & JWT access/refresh token rotation |
+| **AI / Embeddings** | **OpenAI API (`text-embedding-3-small`)** | 1536-dimensional semantic vector embeddings for cross-platform signal correlation |
+
+---
+
+## 🗄️ 3. Polyglot Persistence & Data Model Strategy
+
+Our database architecture decouples **Relational Incident Metadata** (PostgreSQL) from **Unstructured Telemetry Logs** (MongoDB).
 
 ```
-                  ┌───────────────────────────────────────────┐
-                  │           FastAPI Backend Core            │
-                  └─────────────────────┬─────────────────────┘
-                                        │
-           ┌────────────────────────────┴────────────────────────────┐
-           ▼                                                         ▼
-┌──────────────────────────────┐                         ┌──────────────────────────────┐
-│  PostgreSQL (Relational SQL) │                         │   MongoDB (Document Store)   │
-│  - Users & Organizations     │                         │   - evidence collection      │
-│  - Memberships & RBAC Roles  │                         │   - Unstructured JSON logs    │
-│  - Integration Secrets (Enc) │                         │   - Linked & Standalone Logs │
-│  - Investigation Containers  │                         └──────────────────────────────┘
-│  - AI Diagnostic Reports     │
-└──────────────────────────────┘
+                      ┌─────────────────────────────────────────┐
+                      │    PostgreSQL (Relational Storage)      │
+                      ├─────────────────────────────────────────┤
+                      │ • Organizations  (Tenants)              │
+                      │ • Users & Memberships                   │
+                      │ • Integrations   (Platform Credentials) │
+                      │ • Investigations (Incident Containers)  │
+                      └────────────────────┬────────────────────┘
+                                           │
+                                  1-to-N   │ (Linked by investigation_id UUID)
+                                           │
+                      ┌────────────────────▼────────────────────┐
+                      │     MongoDB (Unstructured Storage)      │
+                      ├─────────────────────────────────────────┤
+                      │ • Evidence Collection (Telemetry Logs)  │
+                      │   - Gmail emails, Slack messages,       │
+                      │     GitHub commits, Jira issues         │
+                      └─────────────────────────────────────────┘
 ```
 
-### 3.1. Relational Database Schema (PostgreSQL)
+### 1. PostgreSQL Schema Highlights:
+* **`organizations`**: Tenant boundary (`id`, `name`, `slug`, `created_at`).
+* **`users`**: Platform user accounts (`id`, `email`, `hashed_password`, `first_name`, `last_name`).
+* **`integrations`**: Platform connections (`id`, `organization_id`, `platform`, `credentials_encrypted`, `config`, `status`). Enforces 1-to-1 platform mapping per organization.
+* **`investigations`**: Incident triage containers (`id`, `organization_id`, `title`, `description`, `severity`, `status`, `detected_at`).
+  * `severity`: `critical`, `high`, `medium`, `low`
+  * `status`: `open`, `investigating`, `resolved`, `closed`
 
-* **`users`**: User profiles (`id`, `email`, `password_hash`, `is_active`, `is_verified`, `created_at`).
-* **`organizations`**: Multi-tenant boundaries (`id`, `name`, `slug`, `created_at`).
-* **`memberships`**: RBAC user-to-org mappings (`id`, `user_id`, `organization_id`, `role` in `owner`, `admin`, `member`, `viewer`).
-* **`integrations`**: Platform credentials and rules (`id`, `organization_id`, `platform`, `credentials_encrypted` via Fernet, `config` JSONB, `status`).
-* **`investigations`**: Active incident containers (`id`, `organization_id`, `title`, `description`, `severity`, `status`, `assigned_to_id`, `suggestion_action`, `detected_at`).
-* **`diagnoses`**: Persisted LLM reports (`id`, `investigation_id`, `triggered_by_id`, `report_summary`, `created_at`).
+### 2. MongoDB Schema (`evidence` collection):
+* **`id`**: Unique UUID string identifier.
+* **`investigation_id`**: UUID string referencing a PostgreSQL `investigation.id`, OR `null` for standalone evidence.
+* **`type`**: Source platform (`gmail`, `slack`, `github`, `jira`, `alert`).
+* **`summary`**: Event headline/subject.
+* **`author_name`**: Sender or committer name.
+* **`source_url`**: Direct link to source item.
+* **`metadata`**: JSON object storing full payload headers, snippet, and multiline **`body`** text.
+* **`created_at`**: Timestamp.
 
-### 3.2. Document Database Schema (MongoDB `evidence` collection)
+> **Key Architectural Guarantee**: Evidence can exist independently (`investigation_id = null`) as standalone operational telemetry, eliminating PostgreSQL table clutter for non-incident events.
 
-```json
+---
+
+## ⚙️ 4. The 5-Stage Ingestion Pipeline Architecture
+
+Every incoming signal (polled via background worker every 60s or received via webhooks) flows through **5 sequential pipeline stages**:
+
+```
+ [Raw Event Payload]
+        │
+        ▼
+ ┌───────────────┐
+ │    Stage 1    │ ── (Fails Boundary Check?) ──► IGNORED (0 DB Writes)
+ │ Platform      │
+ │ Filter        │
+ └──────┬────────┘
+        │ (Passes)
+        ▼
+ ┌───────────────┐
+ │    Stage 2    │ ──► Normalizes to uniform schema:
+ │ Normalize     │     { summary, author_name, source_url, metadata.body }
+ │ Payload       │
+ └──────┬────────┘
+        │
+        ▼
+ ┌───────────────┐
+ │    Stage 3    │
+ │ Signal/Noise  │ ── (Fails Rules?) ─────────► IGNORED (0 DB Writes)
+ │ Classifier    │
+ └──────┬────────┘
+        │ (Is Valid Signal)
+        ▼
+ ┌───────────────┐
+ │    Stage 4    │
+ │ Correlation   │ ── (Score >= 0.25 Threshold) ──► CORRELATED (Attach Evidence to
+ │ Engine        │                                  Existing Investigation in MongoDB)
+ └──────┬────────┘
+        │ (Uncorrelated: Score < 0.25)
+        ▼
+ ┌───────────────┐
+ │    Stage 5    │
+ │ Incident      ├──── (Incident Worthy?) ─────► CREATED (Spawn New SQL Investigation
+ │ Worthiness    │                                + Link Evidence in MongoDB)
+ │ & Routing     │
+ └──────┬────────┴──── (Routine Event?) ───────► EVIDENCE_ONLY (Store in MongoDB with
+                                                   investigation_id = null)
+```
+
+---
+
+### Detailed Stage Specifications:
+
+#### **Stage 1: Platform Filter (`platform_filter`)**
+Validates workspace boundary criteria:
+* **GitHub**: Checks if incoming repository (`repository.full_name`) matches `tracked_repos` in integration config.
+* **Slack**: Checks if incoming channel matches `configured_channel_id`.
+* **Jira**: Checks if project key matches `tracked_projects`.
+
+#### **Stage 2: Payload Normalization (`normalize_payload`)**
+Parses platform-specific JSON payloads into a uniform dictionary containing `summary`, `author_name`, `source_url`, and structured `metadata`:
+* **Gmail**: Base64url decodes multiline email bodies (`body`), header subjects, and sender info.
+* **GitHub Webhooks**:
+  * `pull_request`: Title, head branch (`fix/auth-gateway-oom`), base branch (`main`), state (`opened`, `merged`), author, body text, and repo slug.
+  * `workflow_run`: CI workflow name, conclusion (`failure`, `success`), head branch, build runner actor, and log URL.
+  * `issues`: Issue number, title, body, and operational labels (`bug`, `P0`, `critical`, `blocker`).
+  * `push`: Branch ref (`refs/heads/main`), commit message, committer, and repo slug.
+
+#### **Stage 3: Signal / Noise Classifier (`classify_signal`)**
+Evaluates user-configured triage settings using an **Inclusive OR Model**:
+* **Trigger 1 (Allowed Senders)**: Is the sender email/domain in `allowed_senders`?
+* **Trigger 2 (Subject Rules)**: Does the subject match `subject_contains` or `subject_starts_with`?
+* **Trigger 3 (Keyword Rules)**: Does the body/summary contain any `required_keywords`?
+* **GitHub Specific Noise Filtering**:
+  * Drops `dependabot[bot]` PRs automatically.
+  * Drops background maintenance branches: `chore/*`, `docs/*`, `style/*`, `renovate/*`.
+  * Drops redundant `push` events to non-default PR branches (since the `pull_request` event lifecycle already tracks PR activity).
+
+If **ANY** trigger matches, the event is classified as an operational **Signal**. If none match, it is dropped as **Noise** (`status: "ignored"`).
+
+#### **Stage 4: Multi-Phase Correlation Engine (`correlate_signal`)**
+Evaluates the incoming signal against active open investigations for the tenant (`status IN ('open', 'investigating')`) using our **Phase 2 Hybrid Scoring Model**:
+$$\text{Score} = \Big( 0.40 \cdot \text{EntityScore} + 0.40 \cdot \text{VectorScore} + 0.20 \cdot \text{KeywordScore} \Big) \cdot \text{TimeDecay}$$
+* **Branch Entity Priority**: Extracts microservice identifiers directly from branch patterns (`fix/auth-gateway-pod-12-oom` $\rightarrow$ `services: {"auth-gateway-pod-12"}`).
+* If a candidate scores $\ge 0.25$, the evidence is attached directly to that existing investigation (`status: "correlated"`).
+
+#### **Stage 5: Incident Worthiness & Storage Routing (`is_incident_worthy`)**
+If Stage 4 returns no correlation match:
+* **GitHub Incident-Worthy Events**:
+  * CI Workflow Failures (`workflow_run.failure`, `cancelled`, `timed_out`).
+  * Issues labeled `bug`, `P0`, `critical`, or `blocker`.
+  * PRs on incident branches (`bug/*`, `hotfix/*`, `bugfix/*`, `incident/*`) containing critical incident keywords (`critical`, `outage`, `error`, `failed`, `leak`, `crash`, `panic`, `fatal`, `p0`, `p1`).
+  * **Result**: Spawns a new **PostgreSQL `Investigation` container** + attaches Evidence in MongoDB (`status: "created"`).
+* **Routine GitHub PRs / Commits**:
+  * Uncorrelated feature PRs (`feature/*`) or maintenance events are stored as **Standalone Evidence in MongoDB** (`investigation_id = null`, `status: "evidence_only"`), keeping PostgreSQL 100% clean.
+
+---
+
+## 🫀 5. Deep Dive: The Core Heart — Multi-Phase Correlation Engine
+
+The correlation engine is the core intelligence of our platform. It answers the question:
+> *"Does an incoming telemetry signal belong to an active, ongoing incident, or is it a separate issue?"*
+
+### The Problem With Naive Token Matching:
+Simple word-counting algorithms fail in production because:
+1. **Generic Word Overlap**: Titles containing generic terms like `gateway` or `service` get incorrectly grouped together even if one is `Auth Gateway` and the other is `Payment Service`.
+2. **Lack of Temporal Awareness**: An incident created 10 minutes ago is actively evolving, whereas an investigation opened 3 weeks ago shouldn't pull in new signals.
+3. **Vocabulary Mismatch**: A Datadog email might say `Memory Exhaustion` while a Sentry email says `OutOfMemoryError`. Simple set intersection fails to match them.
+
+---
+
+### 🔬 The 3-Phase Multi-Phase Architecture
+
+```
+                               ┌────────────────────────────────────────────────────────┐
+                               │             INCOMING TELEMETRY SIGNAL                  │
+                               └───────────────────────────┬────────────────────────────┘
+                                                           │
+                                                           ▼
+ ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │                                       PHASE 1: DETERMINISTIC ENGINE                                              │
+ ├─────────────────────────────────────────┬──────────────────────────────────────────┬─────────────────────────────┤
+ │ 1. Entity Extraction (`extract_entities`)│ 2. Composite Fingerprint                  │ 3. Exponential Time Decay   │
+ │    Extracts:                            │    (`build_investigation_fingerprint`)   │    (`compute_time_decay`)   │
+ │    • Services: auth-gateway-pod-12     │    Combines: Title + Summaries of all    │    Formula:                 │
+ │    • Errors:   502, OutOfMemoryError    │    previously attached evidence from     │    decay = 0.5^(hours / 24) │
+ │    • Alert IDs: PD4920, STRIPE-CRIT-9021│    MongoDB into a composite text.       │    Recent = 1.0 | 7d = 0.007 │
+ └─────────────────────────────────────────┴──────────────────────────────────────────┴─────────────────────────────┘
+                                                           │
+                                                           ▼
+ ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │                                    PHASE 2: SEMANTIC VECTOR EMBEDDING ENGINE                                     │
+ ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+ │ • OpenAI `text-embedding-3-small` (1536-dimensional vector array)                                                │
+ │ • Cosine Vector Similarity (`cosine_similarity`): cos(θ) = (A · B) / (||A|| ||B||)                               │
+ │ • Automatic Phase 1 Fallback: If OPENAI_API_KEY is unconfigured, returns None & falls back gracefully.          │
+ └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                           │
+                                                           ▼
+ ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+ │                                      HYBRID CORRELATION SCORING FORMULA                                          │
+ ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+ │                                                                                                                  │
+ │   FinalScore = [ ( EntityMatch * 0.40 ) + ( CosineVectorSim * 0.40 ) + ( KeywordJaccard * 0.20 ) ] * TimeDecay    │
+ │                                                                                                                  │
+ │   • EntityMatch = Service Match (+0.60) + Error Code Match (+0.25) + Alert ID Match (+0.15)                     │
+ │   • Threshold: If FinalScore >= 0.25 ──► Match Confirmed (CORRELATED)                                             │
+ └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Step-by-Step Function Breakdown:
+
+#### 1. Entity Extraction (`extract_entities(text: str) -> dict[str, set[str]]`)
+Scans text using targeted regular expressions to isolate high-value system entities:
+```python
 {
-  "_id": "uuid-string-primary-key",
-  "investigation_id": "investigation-uuid-string-or-null",
-  "type": "gmail | slack | github | jira | alert",
-  "summary": "String title or commit message summary",
-  "author_name": "Author / Bot Sender Name",
-  "source_url": "HTTPS deep link to commit / ticket / message",
-  "metadata": {
-    "email": { "id": "...", "subject": "...", "from": "...", "snippet": "..." },
-    "commit_sha": "...",
-    "raw_headers": {}
-  },
-  "created_at": "ISODate timestamp (UTC)"
+    "services": {"auth-gateway-pod-12"},
+    "errors": {"502", "OutOfMemoryError"},
+    "alert_ids": {"PD4920", "STRIPE-CRIT-9021"}
 }
 ```
 
-### 3.3. Database Test Isolation Setup
+#### 2. Composite Fingerprint Builder (`build_investigation_fingerprint`)
+Fetches all evidence documents linked to a candidate investigation from MongoDB and combines them:
+$$\text{Composite Text} = \text{Investigation Title} + \text{Evidence Summary \#1} + \text{Evidence Summary \#2} + \dots$$
 
-To ensure unit testing never wipes development or production data:
+#### 3. Exponential Time Decay (`compute_time_decay(detected_at, half_life_hours=24.0) -> float`)
+Calculates an age decay multiplier:
+$$\text{TimeDecay} = 0.5^{\left(\frac{\text{hours\_elapsed}}{24.0}\right)}$$
+* **0 Hours Ago**: `1.0` (100% full weight)
+* **24 Hours Ago**: `0.5` (50% weight)
+* **7 Days Ago**: `0.0078` (0.78% weight)
 
-| Environment | PostgreSQL Database | MongoDB Database |
-| :--- | :--- | :--- |
-| **Development** | `oip_db` | `oip_mongo` |
-| **Automated Testing (Pytest)** | `oip_db_test` | `oip_mongo_test` |
+#### 4. Vector Embedding Generator (`generate_embedding(text) -> list[float] | None`)
+Calls OpenAI's `text-embedding-3-small` model to convert text into a 1536-dimensional float vector array. Returns `None` gracefully if unconfigured.
 
-* **PostgreSQL Isolation**: Pytest uses transactional isolation (`conftest.py`), creating `oip_db_test` and rolling back transactions per test.
-* **MongoDB Isolation**: Setting `settings.ENVIRONMENT = "testing"` in `conftest.py` causes `get_mongo_db()` in `app/db/mongo.py` to route all Motor client calls to `oip_mongo_test`. Your development database (`oip_mongo`) is **100% safe and untouched** during test runs.
+#### 5. Cosine Similarity Calculator (`cosine_similarity(vec_a, vec_b) -> float`)
+Calculates dot product similarity between 1536-dimensional vectors:
+$$\cos(\theta) = \frac{\mathbf{A} \cdot \mathbf{B}}{\|\mathbf{A}\| \|\mathbf{B}\|}$$
 
----
+#### 6. Hybrid Correlation Scorer (`score_hybrid_correlation`)
+Combines Entity Match (40%), Vector Cosine Similarity (40%), and Keyword Overlap (20%) multiplied by Time Decay:
+$$\text{FinalScore} = \Big(\text{EntityMatch} \times 0.40 + \text{CosineSimilarity} \times 0.40 + \text{KeywordMatch} \times 0.20\Big) \times \text{TimeDecay}$$
 
-## 4. Integration Connectors & Background Sync
-
-### 4.1. GitHub Integration
-* **Ingest Route**: `POST /api/v1/integrations/github/webhook`.
-* **Payload Parsing**: Extracts head commit messages, author username/name, and commit URL. Enforces `tracked_repos` filter.
-
-### 4.2. Slack Integration
-* **Ingest Route**: `POST /api/v1/integrations/slack/webhook`.
-* **OAuth 2.0**: Redirect & token exchange endpoints (`/authorize`, `/callback`).
-* **Closed-Loop Action**: `POST /api/v1/investigations/{id}/share-slack` decrypts bot token, formats Slack Markdown alert block, and posts to configured triage channel via `chat.postMessage`.
-
-### 4.3. Gmail Integration & Background Worker (`gmail_worker.py`)
-* **OAuth 2.0**: Consent consent flow with offline refresh token support.
-* **Background Worker**: `start_gmail_polling_worker()` runs continuously inside FastAPI lifespan lifecycle.
-* **Token Auto-Refresh**: If Google API returns `401 Unauthorized`, automatically exchanges `refresh_token` for a new `access_token` at `https://oauth2.googleapis.com/token`, saves updated encrypted credentials to SQL, and retries email fetch.
-* **Polling Query**: Polling parameters support `search_query`, `allowed_senders`, `required_keywords`, and `last_checked_time`.
-
-### 4.4. Jira Software Integration
-* **Basic Auth Connector**: `POST /api/v1/integrations/jira/connect` validates credentials against Jira Cloud API `/rest/api/3/myself` using `auth=(email, api_token)`.
-* **Closed-Loop Action**: `POST /api/v1/investigations/{id}/escalate-jira` formats Atlassian Document Format (ADF) JSON payloads, creates Task issues on Jira Cloud (`POST /rest/api/3/issue`), appends ticket keys (`PROD-404`) to `investigation.suggestion_action`, and returns `/browse/KEY` links.
+* **Phase 1 Fallback**: If vector embeddings are `None`, it seamlessly falls back to:
+$$\text{FinalScore} = \Big(\text{EntityMatch} \times 0.50 + \text{KeywordMatch} \times 0.30\Big) \times \text{TimeDecay}$$
 
 ---
 
-## 5. AI Forensic Diagnosis Engine (`DiagnosisService`)
+### 📊 Real-World Mathematical Walkthrough Example
 
-* **Endpoint**: `POST /api/v1/investigations/{id}/diagnose`.
-* **Process**:
-  1. Fetches all evidence chronologically from MongoDB for the investigation ID.
-  2. Formats a operational system prompt + chronological evidence timeline context.
-  3. Queries OpenAI API (`AsyncOpenAI`, model `gpt-4o`, `temperature=0.2`, `max_tokens=500`).
-  4. Saves `Diagnosis` row in PostgreSQL and updates `investigation.status = "investigating"` and `investigation.suggestion_action`.
-  5. Includes a local heuristic fallback diagnosis generator if OpenAI API keys are unconfigured or fail.
+#### Active Investigation #1 (Opened 1 Hour Ago):
+* **Title**: `Datadog Alert: High Memory Spikes on auth-gateway-pod-12`
+* **Attached Evidence**: `Sentry OutOfMemoryError in GatewayController`
+* **Timestamp**: 1 hour ago (`TimeDecay = 0.97`)
 
----
+#### Incoming Email Payload:
+* **Subject**: `PagerDuty Incident #4920: Token validation timeout on auth-gateway-pod-12`
+* **Body**: `504 Gateway Timeout errors detected on auth-gateway-pod-12`
 
-## 6. Frontend Operations UI Structure
+#### Mathematical Evaluation:
+1. **Entity Match Score (40% Weight)**:
+   * Both incoming email & investigation refer to `auth-gateway-pod-12`.
+   * Service Match = `+0.60` $\rightarrow 0.60 \times 0.40 = \mathbf{0.24}$.
+2. **Vector Cosine Similarity (40% Weight)**:
+   * OpenAI embedding vector similarity = `0.85`.
+   * Vector Score = $0.85 \times 0.40 = \mathbf{0.34}$.
+3. **Keyword Jaccard Overlap (20% Weight)**:
+   * Non-stop-words overlap (`auth`, `gateway`, `timeout`) = `0.30`.
+   * Keyword Score = $0.30 \times 0.20 = \mathbf{0.06}$.
+4. **Time Decay**:
+   * Elapsed 1 hour $\rightarrow \text{TimeDecay} = 0.97$.
 
-Built with React 18, Vite, Tailwind CSS, TanStack Query, and Zustand following Linear/Palantir light-mode design tokens:
+$$\text{Base Score} = 0.24 + 0.34 + 0.06 = 0.64$$
+$$\mathbf{Final Score} = 0.64 \times 0.97 = \mathbf{0.621}$$
 
-* **Attention Deck Dashboard (`/dashboard`)**: Displays active critical investigation cards, risk severity badges, assignees, and real-time **Active Signal Stream** polling `GET /evidence/recent`.
-* **Integrations Hub (`/integrations`)**: Config cards for GitHub, Slack, Gmail, Jira with 1-click OAuth, Basic Auth credential forms, and filter drawers.
-* **Investigation Details (`/investigations/:id`)**:
-  * Multi-pane view with container scrolling (`overflow-y-auto min-h-0`).
-  * **Left Pane**: Root Cause summary, Suggested Remediation, **Share to Slack** (brand purple `#4A154B`) & **Escalate to Jira** (brand blue `#0052CC`) buttons, live terminal logs.
-  * **Center Pane**: Multi-platform Evidence Feed timeline showing platform badges, author pills, and source links.
-  * **Right Pane**: Entity references and interactive audit comment stream.
-
----
-
-## 7. Complete Implementation Matrix: What Works vs. Roadmap
-
-### ✅ **WHAT IS 100% WORKING & VERIFIED**
-* [x] Multi-tenant user authentication, organization management, and RBAC membership scoping.
-* [x] Fernet symmetric encryption for integration OAuth & API tokens.
-* [x] 5-Stage rule-based Ingestion Pipeline (`platform_filter` ➔ `normalize_payload` ➔ `classify_signal` ➔ `correlate_signal` ➔ `is_incident_worthy`).
-* [x] Rule-based Signal/Noise classification (`allowed_senders`, `required_keywords`, `subject_filters`).
-* [x] Standalone evidence storage in MongoDB (`investigation_id = null`) to eliminate SQL table pollution.
-* [x] GitHub, Slack, Gmail, and Jira integrations (OAuth 2.0 & Basic Auth).
-* [x] Continuous background Gmail worker loop with automatic OAuth token refresh on 401.
-* [x] AI Forensic Diagnosis Engine (GPT-4o + fallback).
-* [x] Closed-loop operations: **Share to Slack** & **Escalate to Jira**.
-* [x] Dual-database test isolation (`oip_db_test` PostgreSQL + `oip_mongo_test` MongoDB).
-* [x] Attention Deck Dashboard, Signal Stream, Integrations Hub, Investigation Details multi-pane UI with scroll containers.
-* [x] **46 Passing Pytest Integration Tests**.
-
-### ⏳ **WHAT REMAINS TO BE IMPLEMENTED (From Master `PLAN.md`)**
-* [ ] **Global Command Palette (`⌘K`)**: Centered search modal for rapid navigation across investigations, entities, and actions.
-* [ ] **Dynamic Entity Details Hub (`/entities/:type/:id`)**: Aggregate summary pages for specific Customers (e.g. `TechCorp`), Services (e.g. `Auth Gateway`), Teams, or Projects.
-* [ ] **Notion Integration Connector & Evidence Cards**: Connecting Notion workspaces and rendering doc cards inside Evidence Feeds.
-* [ ] **Automated Executive Reports & Postmortems (`/reports`)**: Generating downloadable PDF/Markdown postmortem summaries for leadership.
-* [ ] **Sidebar Workspace Switcher UI**: Workspace org selection dropdown inside the sidebar navigation.
+Since $\mathbf{0.621} \ge 0.25$ threshold: **MATCH CONFIRMED (CORRELATED)**. The email is attached to Investigation #1!
 
 ---
 
-*This specification document is up to date and reflects the exact state of the codebase.*
+## 🔒 6. Authentication, Security & Cookie Architecture
+
+### 1. Dual-Token Authentication Architecture:
+* **Access Tokens**: Short-lived JWTs (15-minute expiration) passed via `Authorization: Bearer <token>` headers.
+* **Refresh Tokens**: Long-lived JWTs (7-day expiration) stored in **`HttpOnly`**, **`SameSite=Lax`** cookies (`refresh_token`).
+
+### 2. Silent Refresh Token Interceptor (`frontend/src/lib/api.ts`):
+When an access token expires and an API call returns `401 Unauthorized`:
+1. `api.ts` intercepts the response before logging out.
+2. Automatically dispatches a background call to `POST /api/v1/auth/refresh` with `credentials: 'include'`.
+3. Obtains a new 15-minute access token, updates the Zustand auth store, and retries the original API request transparently without redirecting the user to the landing page.
+4. Concurrent requests during a refresh are queued and retried automatically.
+
+### 3. Credential Encryption (`credentials_encrypted`):
+Integration OAuth tokens and client secrets are encrypted at rest using **Fernet (AES-128-CBC)** symmetric encryption derived from `SECRET_KEY`. Raw OAuth credentials are never stored in plain text.
+
+---
+
+## 🎨 7. Frontend Architecture & User Interface Design
+
+The frontend follows a **Linear / Palantir-inspired high-density operational light theme**:
+
+### Key Components:
+1. **Attention Deck Dashboard (`/dashboard`)**:
+   * Triage view displaying **Threatened Business Targets**, active investigation metrics, and the **Active Signal Stream**.
+2. **Gmail Settings Modal (`GmailSettingsModal.tsx`)**:
+   * 3-section configuration drawer:
+     * **Section 1**: Allowed Senders & Domains + auto-complete suggestions.
+     * **Section 2**: Keyword Rules + starter templates (`Database Outages`, `CI/CD Build Failures`, `Security Alerts`).
+     * **Section 3**: Subject Rules (`Contains` & `Starts With`).
+     * **Live Preview Panel**: Real-time signal matching preview against sample emails.
+3. **Interactive Evidence Detail Modal (`EvidenceDetailModal.tsx`)**:
+   * Formatted email & telemetry reader dialog.
+   * Clicking any item in the Active Signal Stream or Evidence Feed opens full multiline email body payloads, sender avatars, timestamps, and structured metadata tags.
+
+---
+
+## 🧪 8. Database Isolation & Testing Workflow
+
+### 1. Test Isolation:
+* Automated testing executes against an isolated MongoDB database (`oip_mongo_test`) configured in `backend/app/core/config.py` when `ENVIRONMENT == "testing"`, keeping production evidence collections 100% intact.
+
+### 2. Deduplication & 1-to-1 Platform Constraints:
+* `IntegrationService.create_integration` enforces a 1-to-1 platform constraint per organization. If an integration already exists for `(organization_id, platform)`, it updates credentials in-place instead of creating duplicate database rows.
+
+---
+
+## 🔮 9. Phase 3 Roadmap: Enterprise Scale
+
+* **Asynchronous LLM Signal Clustering**: Background worker tasks utilizing LLMs to summarize multi-evidence investigation timelines into automated root-cause diagnoses.
+* **Human Triage Feedback Loop**: Learning correlation weights dynamically based on operator actions (e.g. manually moving or splitting evidence items across investigations).

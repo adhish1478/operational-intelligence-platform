@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 class InvestigationBase(BaseModel):
-    title: str = Field(..., min_length=3, max_length=100)
+    title: str = Field(..., min_length=3, max_length=500)
     description: str | None = Field(None)
     severity : Literal['critical','high','medium','low'] = Field('medium')
     status: Literal["open", "investigating", "resolved"] = Field("open")
