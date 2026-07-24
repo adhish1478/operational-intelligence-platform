@@ -164,13 +164,18 @@ $$\text{Score} = \Big( 0.40 \cdot \text{EntityScore} + 0.40 \cdot \text{VectorSc
 
 #### **Stage 5: Incident Worthiness & Storage Routing (`is_incident_worthy`)**
 If Stage 4 returns no correlation match:
+* **Gmail Incident-Worthy Events**:
+  * **Operational System Monitoring Emails**: Emails from monitoring providers (`Datadog`, `Sentry`, `Grafana`, `Kubernetes`, `PagerDuty`, `CloudWatch`, `Prometheus`, `NewRelic`) or containing operational alert prefixes (`[ALERT]`, `[ERROR]`, `[CRITICAL]`, `incident`).
+  * **User Configured Triage Rules**: Emails matching user-configured integration settings (`allowed_senders`, `subject_starts_with`, `subject_contains`, `required_keywords`).
+  * **Result**: Spawns a new **PostgreSQL `Investigation` container** + attaches Evidence in MongoDB (`status: "created"`).
+  * **Personal Email Filtering**: Personal bank transaction alerts (`ICICI`, `CRED`, `SBI`), newsletters (`The Economist`, `Medium`, `Anaconda`, `NVIDIA`), trading digests (`Groww`, `NSE`), and job alerts (`LinkedIn`, `Indeed`, `hirist`) are filtered out from auto-creating investigations and saved directly as **Standalone Evidence in MongoDB** (`investigation_id = null`, `status: "evidence_only"`).
 * **GitHub Incident-Worthy Events**:
   * CI Workflow Failures (`workflow_run.failure`, `cancelled`, `timed_out`).
   * Issues labeled `bug`, `P0`, `critical`, or `blocker`.
   * PRs on incident branches (`bug/*`, `hotfix/*`, `bugfix/*`, `incident/*`) containing critical incident keywords (`critical`, `outage`, `error`, `failed`, `leak`, `crash`, `panic`, `fatal`, `p0`, `p1`).
   * **Result**: Spawns a new **PostgreSQL `Investigation` container** + attaches Evidence in MongoDB (`status: "created"`).
-* **Routine GitHub PRs / Commits**:
-  * Uncorrelated feature PRs (`feature/*`) or maintenance events are stored as **Standalone Evidence in MongoDB** (`investigation_id = null`, `status: "evidence_only"`), keeping PostgreSQL 100% clean.
+* **Routine Signals**:
+  * Uncorrelated feature PRs (`feature/*`) or general emails are stored as **Standalone Evidence in MongoDB** (`investigation_id = null`, `status: "evidence_only"`), keeping PostgreSQL 100% clean.
 
 ---
 

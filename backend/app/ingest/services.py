@@ -592,6 +592,46 @@ class IngestService:
             # Otherwise, regular PRs/pushes that didn't correlate are stored as Standalone Evidence
             return False
 
+        # Gmail Operational Routing Rules:
+        # Genuine system monitoring alerts spawn NEW SQL Investigations.
+        # Personal newsletters, bank alerts, and job updates go to standalone evidence.
+        if integration.platform == "gmail":
+            author = (parsed.get("author_name") or "").lower()
+            subject = (parsed.get("summary") or "").lower()
+
+            # Non-operational personal email senders -> standalone evidence (never spawn SQL investigation)
+            personal_senders = [
+                "bank", "credit", "card", "newsletter", "digest", "jobs", "job", "careers",
+                "economist", "medium", "indeed", "linkedin", "hirist", "groww", "nse", "sbi",
+                "paypal", "shoppersstop", "udemy", "anaconda", "wispr", "cred.club"
+            ]
+            if any(ps in author for ps in personal_senders):
+                return False
+
+            # Genuine operational monitoring prefixes
+            op_prefixes = ["datadog", "sentry", "grafana", "kubernetes", "k8s", "pagerduty", "cloudwatch", "prometheus", "newrelic", "[alert]", "[error]", "[critical]", "incident"]
+            if any(op in author or op in subject for op in op_prefixes):
+                return True
+
+            # If user has explicit triage rules configured, check them
+            has_any_configured_rules = bool(
+                config.get("allowed_senders") or config.get("required_keywords") or
+                config.get("subject_contains") or config.get("subject_starts_with")
+            )
+            if has_any_configured_rules:
+                required_keywords = [k.lower() for k in config.get("required_keywords", []) if k and k.strip()]
+                if required_keywords and any(kw in full_text for kw in required_keywords):
+                    return True
+                subject_contains = [sc.lower() for sc in config.get("subject_contains", []) if sc and sc.strip()]
+                if subject_contains and any(sc in summary for sc in subject_contains):
+                    return True
+                subject_starts_with = [ss.lower() for ss in config.get("subject_starts_with", []) if ss and ss.strip()]
+                if subject_starts_with and any(summary.startswith(ss) for ss in subject_starts_with):
+                    return True
+
+            # Otherwise, un-configured personal/general emails land in Standalone Evidence
+            return False
+
         # 1. User-configured rule matches (required_keywords, subject_contains, subject_starts_with)
         required_keywords = [k.lower() for k in config.get("required_keywords", []) if k and k.strip()]
         if required_keywords and any(kw in full_text for kw in required_keywords):
