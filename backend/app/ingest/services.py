@@ -1,5 +1,6 @@
 import re
 import uuid
+import zoneinfo
 from typing import Any, Sequence
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,12 @@ from app.investigations.models import Investigation
 from app.evidence.schemas import EvidenceCreate
 from app.evidence.services import EvidenceService
 from app.core.config import settings
+
+
+def get_ist_time_str() -> str:
+    """Returns current time in IST timezone (+05:30)."""
+    ist = zoneinfo.ZoneInfo("Asia/Kolkata")
+    return datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S IST")
 
 
 class IngestService:
@@ -693,16 +700,24 @@ class IngestService:
         5. Incident-Worthiness Evaluation & Storage Routing
         """
         # Step 1: Platform Filter
+        ist_now = get_ist_time_str()
+        platform = integration.platform.upper()
+
         allowed, filter_reason = IngestService.platform_filter(integration, raw_payload)
         if not allowed:
+            print(f"[{ist_now}] 🚫 [{platform}] IGNORED (Platform Filter): {filter_reason}")
             return {"status": "ignored", "reason": filter_reason}
 
         # Step 2: Normalize Payload
         parsed = IngestService.normalize_payload(integration.platform, raw_payload)
+        author = parsed.get("author_name") or "Unknown"
+        summary = parsed.get("summary") or "No Summary"
+        print(f"[{ist_now}] 📥 INCOMING TELEMETRY | Platform: {platform} | Author: {author[:30]} | Summary: {summary[:80]}")
 
         # Step 3: Signal / Noise Classification
         is_signal, noise_reason = IngestService.classify_signal(integration, parsed)
         if not is_signal:
+            print(f"[{ist_now}] 🔇 [{platform}] IGNORED (Noise Filter): {noise_reason}")
             return {"status": "ignored", "reason": noise_reason}
 
         # Step 4: Correlation Engine (Phase 1 Advanced Weighted Scoring)
@@ -719,6 +734,7 @@ class IngestService:
                 metadata=parsed["metadata"]
             )
             evidence = await EvidenceService.create_evidence(mongo_db, matched_inv.id, evidence_in)
+            print(f"[{ist_now}] 🔗 [{platform}] CORRELATED -> Linked to Investigation {matched_inv.id} ({matched_inv.title[:50]})")
             return {
                 "status": "correlated",
                 "investigation_id": matched_inv.id,
@@ -736,6 +752,7 @@ class IngestService:
                 metadata=parsed["metadata"]
             )
             evidence = await EvidenceService.create_evidence(mongo_db, None, evidence_in)
+            print(f"[{ist_now}] 📦 [{platform}] STANDALONE EVIDENCE -> Stored in Mongo (investigation_id = None)")
             return {
                 "status": "evidence_only",
                 "evidence_id": evidence.id,
@@ -763,6 +780,7 @@ class IngestService:
             metadata=parsed["metadata"]
         )
         evidence = await EvidenceService.create_evidence(mongo_db, new_inv.id, evidence_in)
+        print(f"[{ist_now}] 🚨 [{platform}] NEW INVESTIGATION CREATED -> ID: {new_inv.id} | Severity: {severity.upper()}")
 
         return {
             "status": "created",
