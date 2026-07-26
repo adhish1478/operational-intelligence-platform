@@ -1,11 +1,41 @@
 import uuid
+import logging
 from typing import Any
 from fastapi import APIRouter, status, Depends, HTTPException
 from app.api.deps import DBSessionDep, MongoSessionDep
 from app.integrations.services import IntegrationService
 from app.ingest.services import IngestService
+from app.queues.rabbitmq import rabbitmq_manager
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ingest", tags=["ingest"])
+
+
+async def dispatch_ingest_event(db, mongo_db, integration, payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Dispatches incoming webhook payload to RabbitMQ event queue.
+    Falls back to synchronous in-process correlation if RabbitMQ is offline.
+    """
+    platform = integration.platform
+    org_id = str(integration.organization_id)
+
+    try:
+        event_id = await rabbitmq_manager.publish_event(
+            platform=platform,
+            payload=payload,
+            organization_id=org_id
+        )
+        return {
+            "status": "queued",
+            "event_id": event_id,
+            "platform": platform,
+            "organization_id": org_id,
+            "mode": "async_queue"
+        }
+    except Exception as queue_err:
+        logger.warning(f"RabbitMQ queue publish failed ({queue_err}). Falling back to synchronous processing.")
+        return await IngestService.correlate_and_process(db, mongo_db, integration, payload)
+
 
 @router.post("/slack", status_code=status.HTTP_200_OK)
 async def receive_global_slack_webhook(
@@ -52,8 +82,8 @@ async def receive_global_slack_webhook(
             detail=f"No active Slack integration found for workspace team_id '{team_id}'"
         )
 
-    # 3. Process signal through IngestService
-    return await IngestService.correlate_and_process(db, mongo_db, integration, payload)
+    # 3. Dispatch to RabbitMQ queue or process fallback
+    return await dispatch_ingest_event(db, mongo_db, integration, payload)
 
 
 @router.post("/jira", status_code=status.HTTP_200_OK)
@@ -83,7 +113,7 @@ async def receive_global_jira_webhook(
         )
 
     integration = active_jira_integrations[0]
-    return await IngestService.correlate_and_process(db, mongo_db, integration, payload)
+    return await dispatch_ingest_event(db, mongo_db, integration, payload)
 
 
 @router.post("/{integration_id}", status_code=status.HTTP_200_OK)
@@ -115,7 +145,5 @@ async def receive_webhook_payload(
             detail="Webhook payload rejected: Integration is currently disconnected"
         )
         
-    # 3. Call IngestService to parse, correlate, and save
-    result = await IngestService.correlate_and_process(db, mongo_db, integration, payload)
-    
-    return result
+    # 3. Dispatch event to RabbitMQ queue
+    return await dispatch_ingest_event(db, mongo_db, integration, payload)
