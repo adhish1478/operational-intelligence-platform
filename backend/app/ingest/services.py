@@ -273,6 +273,119 @@ async def handle_slack_delete(
     return None
 
 
+async def correlate_jira_issue_key(
+    mongo_db: AsyncIOMotorDatabase,
+    issue_key: str | None
+) -> str | None:
+    """
+    Issue-key based deterministic correlation for Jira events.
+    If an event references an issue key (e.g. KAN-3), find any existing evidence record
+    in MongoDB with the same issue_key that has a non-null investigation_id.
+    """
+    if not issue_key:
+        return None
+
+    query = {
+        "type": "jira",
+        "metadata.issue_key": issue_key,
+        "investigation_id": {"$ne": None},
+        "metadata.retracted": {"$ne": True}
+    }
+
+    existing_evidence = await mongo_db.evidence.find_one(query)
+    if existing_evidence and existing_evidence.get("investigation_id"):
+        return existing_evidence["investigation_id"]
+
+    return None
+
+
+async def handle_jira_comment_edit(
+    mongo_db: AsyncIOMotorDatabase,
+    issue_key: str | None,
+    comment_id: str | None,
+    new_body: str,
+    author_name: str
+) -> str | None:
+    """Update existing comment evidence in-place when a Jira comment is edited."""
+    if not issue_key or not comment_id:
+        return None
+
+    existing = await mongo_db.evidence.find_one({
+        "type": "jira",
+        "metadata.issue_key": issue_key,
+        "metadata.comment_id": comment_id
+    })
+    if existing:
+        doc_id = existing["_id"]
+        await mongo_db.evidence.update_one(
+            {"_id": doc_id},
+            {"$set": {
+                "metadata.comment": new_body,
+                "metadata.edited": True,
+                "summary": f"Jira [{issue_key}] [COMMENT EDITED] by {author_name}: {new_body[:80]}"
+            }}
+        )
+        return str(doc_id)
+    return None
+
+
+async def handle_jira_comment_delete(
+    mongo_db: AsyncIOMotorDatabase,
+    issue_key: str | None,
+    comment_id: str | None
+) -> str | None:
+    """Mark existing comment evidence as retracted when a Jira comment is deleted."""
+    if not issue_key or not comment_id:
+        return None
+
+    existing = await mongo_db.evidence.find_one({
+        "type": "jira",
+        "metadata.issue_key": issue_key,
+        "metadata.comment_id": comment_id
+    })
+    if existing:
+        doc_id = existing["_id"]
+        old_summary = existing.get("summary", "")
+        await mongo_db.evidence.update_one(
+            {"_id": doc_id},
+            {"$set": {
+                "metadata.retracted": True,
+                "summary": f"{old_summary} [RETRACTED]"
+            }}
+        )
+        return str(doc_id)
+    return None
+
+
+async def handle_jira_issue_delete(
+    mongo_db: AsyncIOMotorDatabase,
+    issue_key: str | None
+) -> list[str]:
+    """Mark ALL evidence records for an issue key as retracted when a Jira issue is deleted."""
+    if not issue_key:
+        return []
+
+    cursor = mongo_db.evidence.find({
+        "type": "jira",
+        "metadata.issue_key": issue_key
+    })
+    retracted_ids = []
+    async for existing in cursor:
+        doc_id = existing["_id"]
+        old_summary = existing.get("summary", "")
+        if not old_summary.endswith("[RETRACTED]"):
+            await mongo_db.evidence.update_one(
+                {"_id": doc_id},
+                {"$set": {
+                    "metadata.retracted": True,
+                    "summary": f"{old_summary} [RETRACTED]"
+                }}
+            )
+            retracted_ids.append(str(doc_id))
+
+    return retracted_ids
+
+
 class IngestService:
     @staticmethod
     def extract_keywords(text: str) -> set[str]:
@@ -840,6 +953,7 @@ class IngestService:
                     "project_name": project_name,
                     "body": title,
                     "comment": comment.get("body") if comment else None,
+                    "comment_id": str(comment.get("id")) if comment and comment.get("id") else None,
                     "attachment": {
                         "filename": attachment.get("filename"),
                         "size": attachment.get("size"),
@@ -1088,6 +1202,28 @@ class IngestService:
             # Otherwise, un-configured personal/general emails land in Standalone Evidence
             return False
 
+        # Jira Structured Incident Routing Rules:
+        # High/Highest priority issues, bugs, or incident issue types spawn NEW SQL Investigations.
+        # Comments, worklogs, attachments, deletions, or lower priority tasks land in standalone evidence or deterministic correlation.
+        if integration.platform == "jira":
+            metadata = parsed.get("metadata") or {}
+            event_type = metadata.get("event_type")
+            priority = str(metadata.get("priority") or "").lower()
+            issue_type = str(metadata.get("issue_type") or "").lower()
+
+            # Comment, worklog, attachment, or deletion events never spawn NEW SQL Investigations on their own
+            if event_type in ("comment_created", "comment_updated", "comment_deleted", "attachment_created", "worklog_created", "jira:issue_deleted"):
+                return False
+
+            # High priority issues or Bug/Incident issue types -> incident-worthy
+            if priority in ("highest", "high", "critical", "p0", "p1", "blocker"):
+                return True
+
+            if issue_type in ("bug", "incident", "security", "vulnerability"):
+                return True
+
+            return False
+
         # 1. User-configured rule matches (required_keywords, subject_contains, subject_starts_with)
         required_keywords = [k.lower() for k in config.get("required_keywords", []) if k and k.strip()]
         if required_keywords and any(kw in full_text for kw in required_keywords):
@@ -1217,6 +1353,32 @@ class IngestService:
                     print(f"[{ist_now}] 🗑️ [SLACK] EVIDENCE RETRACTED (Delete Event: {retracted_id})")
                     return {"status": "retracted", "evidence_id": retracted_id}
 
+        # Step 2.5: Jira Evidence Lifecycle (Comment Edits, Comment Deletions, Issue Deletions)
+        if integration.platform == "jira":
+            webhook_event = parsed.get("metadata", {}).get("event_type")
+            issue_key = parsed.get("metadata", {}).get("issue_key")
+            comment_id = parsed.get("metadata", {}).get("comment_id")
+
+            if webhook_event == "comment_updated":
+                new_body = parsed.get("metadata", {}).get("comment") or ""
+                author_name = parsed.get("author_name") or "Jira User"
+                edited_id = await handle_jira_comment_edit(mongo_db, issue_key, comment_id, new_body, author_name)
+                if edited_id:
+                    print(f"[{ist_now}] ✏️ [JIRA] EVIDENCE UPDATED (Comment Edit: {edited_id})")
+                    return {"status": "updated", "evidence_id": edited_id}
+
+            elif webhook_event == "comment_deleted":
+                retracted_id = await handle_jira_comment_delete(mongo_db, issue_key, comment_id)
+                if retracted_id:
+                    print(f"[{ist_now}] 🗑️ [JIRA] EVIDENCE RETRACTED (Comment Delete: {retracted_id})")
+                    return {"status": "retracted", "evidence_id": retracted_id}
+
+            elif webhook_event == "jira:issue_deleted":
+                retracted_ids = await handle_jira_issue_delete(mongo_db, issue_key)
+                if retracted_ids:
+                    print(f"[{ist_now}] 🗑️ [JIRA] EVIDENCE RETRACTED (Issue Delete: {len(retracted_ids)} items for {issue_key})")
+                    return {"status": "retracted", "evidence_ids": retracted_ids}
+
         author = parsed.get("author_name") or "Unknown"
         summary = parsed.get("summary") or "No Summary"
         print(f"[{ist_now}] 📥 INCOMING TELEMETRY | Platform: {platform} | Author: {author[:30]} | Summary: {summary[:80]}")
@@ -1245,6 +1407,26 @@ class IngestService:
                 return {
                     "status": "correlated",
                     "investigation_id": uuid.UUID(thread_inv_id),
+                    "evidence_id": evidence.id
+                }
+
+        # Step 3.5: Jira Deterministic Issue-Key Correlation
+        if integration.platform == "jira":
+            issue_key = parsed.get("metadata", {}).get("issue_key")
+            jira_inv_id = await correlate_jira_issue_key(mongo_db, issue_key)
+            if jira_inv_id:
+                evidence_in = EvidenceCreate(
+                    type=parsed["type"],
+                    summary=parsed["summary"],
+                    author_name=parsed["author_name"],
+                    source_url=parsed["source_url"],
+                    metadata=parsed["metadata"]
+                )
+                evidence = await EvidenceService.create_evidence(mongo_db, uuid.UUID(jira_inv_id), evidence_in)
+                print(f"[{ist_now}] 🔗 [JIRA] ISSUE-KEY CORRELATED -> Linked to Investigation {jira_inv_id} ({issue_key})")
+                return {
+                    "status": "correlated",
+                    "investigation_id": uuid.UUID(jira_inv_id),
                     "evidence_id": evidence.id
                 }
 

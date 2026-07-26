@@ -14,7 +14,7 @@ Without an intelligent signal processing architecture:
 3. Related events from different platforms (e.g. a Datadog alert, a Sentry OOM exception, and a PagerDuty notification) fail to correlate because they use different terminology across different channels.
 
 ### The Solution:
-Our platform introduces a **5-Stage Ingestion Pipeline** powered by a **Multi-Phase Hybrid Correlation Engine** and a **Polyglot Persistence Model**. It filters noise, correlates cross-platform telemetry into active incident containers with high mathematical precision, and routes routine events into standalone evidence without polluting the operational incident dashboard.
+Our platform introduces a **5-Stage Ingestion Pipeline** powered by a **Multi-Phase Hybrid Correlation Engine**, **LLM Signal Intelligence** (GPT-4o-mini), and a **Polyglot Persistence Model**. It filters noise, correlates cross-platform telemetry into active incident containers with high mathematical precision, and routes routine events into standalone evidence without polluting the operational incident dashboard.
 
 ---
 
@@ -30,6 +30,7 @@ Our platform introduces a **5-Stage Ingestion Pipeline** powered by a **Multi-Ph
 | **Styling & UI** | **Tailwind CSS + Lucide Icons** | Linear / Palantir-inspired high-density operational light design system |
 | **Security & Crypto** | **Fernet (Cryptography) + PyJWT** | AES-128-CBC credential encryption & JWT access/refresh token rotation |
 | **AI / Embeddings** | **OpenAI API (`text-embedding-3-small`)** | 1536-dimensional semantic vector embeddings for cross-platform signal correlation |
+| **AI / Classification** | **OpenAI API (`gpt-4o-mini`)** | LLM-powered signal intelligence classifier for unstructured Slack messages (~$0.000018/call, ~300ms latency) |
 
 ---
 
@@ -80,7 +81,57 @@ Our database architecture decouples **Relational Incident Metadata** (PostgreSQL
 
 ---
 
-## ⚙️ 4. The 5-Stage Ingestion Pipeline Architecture
+## 🔌 4. Integration Architecture & OAuth Flows
+
+### 4.1 Connected Integrations Summary
+
+| Platform | Auth Method | Webhook Delivery | Tracked Scope |
+|---|---|---|---|
+| **Slack** | OAuth 2.0 (Bot Token) | Event Subscriptions → `POST /api/v1/ingest/slack` | Multi-channel (`tracked_channels[]`) |
+| **Jira** | OAuth 2.0 (3LO Authorization Code) | Dynamic Webhooks → `POST /api/v1/ingest/jira` | Multi-project (`tracked_projects[]`) |
+| **GitHub** | OAuth 2.0 (App Installation) | Repository Webhooks → `POST /api/v1/ingest/{integration_id}` | Multi-repo (`tracked_repos[]`) |
+| **Gmail** | Google OAuth 2.0 | Background Polling (60s interval) | User-configured triage rules |
+
+### 4.2 Slack OAuth & Event Subscription
+
+**Bot Scopes**: `channels:read`, `groups:read`, `chat:write`, `app_mentions:read`, `users:read`, `reactions:read`
+
+OAuth flow: `GET /api/v1/integrations/slack/authorize` → Slack OAuth → `GET /api/v1/integrations/slack/callback`
+
+**Multi-Channel Tracking**: UI dynamically fetches workspace channels from Slack `conversations.list` API. Users select multiple channels. Events from non-tracked channels are dropped at Step 1 (Platform Filter).
+
+**Event Types Processed**: `message`, `message_changed`, `message_deleted`, `channel_topic`, `channel_purpose`, `file_share`, `reaction_added`
+
+### 4.3 Jira OAuth 2.0 (3LO) & Dynamic Webhooks
+
+**Scopes**: `read:jira-work`, `write:jira-work`, `read:jira-user`, `manage:jira-webhook`, `offline_access`
+
+OAuth flow:
+1. `GET /api/v1/integrations/jira/authorize` → Redirects to `auth.atlassian.com/authorize`
+2. User grants consent → `GET /api/v1/integrations/jira/callback`
+3. Callback exchanges authorization code for tokens via `POST auth.atlassian.com/oauth/token`
+4. Fetches Cloud ID via `GET api.atlassian.com/oauth/token/accessible-resources`
+5. Dynamically fetches workspace project keys (`GET /rest/api/3/project`)
+6. Registers dynamic webhooks with project-specific JQL filter: `project in ("KAN", "PROD")`
+
+**Webhook Events Registered (8 total)**:
+`jira:issue_created`, `jira:issue_updated`, `jira:issue_deleted`, `comment_created`, `comment_updated`, `comment_deleted`, `worklog_created`, `attachment_created`
+
+### 4.4 GitHub OAuth & Repository Webhooks
+
+OAuth flow: `GET /api/v1/integrations/github/authorize` → GitHub OAuth → `GET /api/v1/integrations/github/callback`
+
+**Events Processed**: `pull_request`, `workflow_run`, `issues`, `push`
+
+### 4.5 Gmail Google OAuth & Background Polling
+
+OAuth flow: `GET /api/v1/integrations/gmail/authorize` → Google OAuth → `GET /api/v1/integrations/gmail/callback`
+
+**Polling**: Background worker polls Gmail API every 60 seconds for new messages since `last_checked_time`.
+
+---
+
+## ⚙️ 5. The 5-Stage Ingestion Pipeline Architecture
 
 Every incoming signal (polled via background worker every 60s or received via webhooks) flows through **5 sequential pipeline stages**:
 
@@ -88,36 +139,57 @@ Every incoming signal (polled via background worker every 60s or received via we
  [Raw Event Payload]
         │
         ▼
+ ┌────────────────┐
+ │    Step 0      │ ── (Duplicate event_id / client_msg_id in cache?) ──► IGNORED
+ │ Deduplication   │
+ └───────┬────────┘
+         │ (New Event)
+         ▼
  ┌───────────────┐
- │    Stage 1    │ ── (Fails Boundary Check?) ──► IGNORED (0 DB Writes)
+ │    Step 1     │ ── (Fails Boundary Check?) ──► IGNORED (0 DB Writes)
  │ Platform      │
  │ Filter        │
  └──────┬────────┘
         │ (Passes)
         ▼
  ┌───────────────┐
- │    Stage 2    │ ──► Normalizes to uniform schema:
+ │    Step 2     │ ──► Normalizes to uniform schema:
  │ Normalize     │     { summary, author_name, source_url, metadata.body }
- │ Payload       │
- └──────┬────────┘
+ │ Payload       │     [Slack]: Resolve user/channel IDs + LLM classify
+ └──────┬────────┘     [Jira]: Extract event tags + author resolution
         │
         ▼
  ┌───────────────┐
- │    Stage 3    │
- │ Signal/Noise  │ ── (Fails Rules?) ─────────► IGNORED (0 DB Writes)
+ │  Step 2.5     │ ── (Slack edit/delete?) ──► UPDATE/RETRACT MongoDB Evidence
+ │ Evidence      │    (Jira edit/delete?)  ──► UPDATE/RETRACT MongoDB Evidence
+ │ Lifecycle     │
+ └──────┬────────┘
+        │ (New event)
+        ▼
+ ┌───────────────┐
+ │    Step 3     │
+ │ Signal/Noise  │ ── (Fails Rules?) ──► IGNORED (0 DB Writes)
  │ Classifier    │
  └──────┬────────┘
         │ (Is Valid Signal)
         ▼
  ┌───────────────┐
- │    Stage 4    │
- │ Correlation   │ ── (Score >= 0.25 Threshold) ──► CORRELATED (Attach Evidence to
- │ Engine        │                                  Existing Investigation in MongoDB)
+ │  Step 3.5     │ ── (Slack thread_ts?) ──► THREAD CORRELATED (Deterministic)
+ │ Deterministic │    (Jira issue_key?)  ──► ISSUE-KEY CORRELATED (Deterministic)
+ │ Correlation   │
+ └──────┬────────┘
+        │ (No deterministic match)
+        ▼
+ ┌───────────────┐
+ │    Step 4     │
+ │ Hybrid        │ ── (Score >= 0.25 Threshold) ──► CORRELATED (Attach Evidence to
+ │ Correlation   │                                  Existing Investigation in MongoDB)
+ │ Engine        │
  └──────┬────────┘
         │ (Uncorrelated: Score < 0.25)
         ▼
  ┌───────────────┐
- │    Stage 5    │
+ │    Step 5     │
  │ Incident      ├──── (Incident Worthy?) ─────► CREATED (Spawn New SQL Investigation
  │ Worthiness    │                                + Link Evidence in MongoDB)
  │ & Routing     │
@@ -129,57 +201,119 @@ Every incoming signal (polled via background worker every 60s or received via we
 
 ### Detailed Stage Specifications:
 
-#### **Stage 1: Platform Filter (`platform_filter`)**
+#### **Step 0: Event Deduplication**
+In-memory `PROCESSED_EVENT_IDS` set (capped at 10,000 entries, auto-cleared on overflow). Suppresses duplicate `event_id` or `client_msg_id` from Slack retries and webhook replays.
+
+#### **Step 1: Platform Filter (`platform_filter`)**
 Validates workspace boundary criteria:
 * **GitHub**: Checks if incoming repository (`repository.full_name`) matches `tracked_repos` in integration config.
-* **Slack**: Checks if incoming channel matches `configured_channel_id`.
-* **Jira**: Checks if project key matches `tracked_projects`.
+* **Slack**: Checks if incoming channel matches `tracked_channels[]` or `channel_id`.
+* **Jira**: Checks if project key matches `tracked_projects[]`.
+* **Gmail**: Pass-through (no boundary restriction).
 
-#### **Stage 2: Payload Normalization (`normalize_payload`)**
+#### **Step 2: Payload Normalization (`normalize_payload`)**
 Parses platform-specific JSON payloads into a uniform dictionary containing `summary`, `author_name`, `source_url`, and structured `metadata`:
-* **Gmail**: Base64url decodes multiline email bodies (`body`), header subjects, and sender info.
-* **GitHub Webhooks**:
+
+**Gmail**: Base64url decodes multiline email bodies (`body`), header subjects, and sender info.
+
+**GitHub Webhooks**:
   * `pull_request`: Title, head branch (`fix/auth-gateway-oom`), base branch (`main`), state (`opened`, `merged`), author, body text, and repo slug.
   * `workflow_run`: CI workflow name, conclusion (`failure`, `success`), head branch, build runner actor, and log URL.
   * `issues`: Issue number, title, body, and operational labels (`bug`, `P0`, `critical`, `blocker`).
   * `push`: Branch ref (`refs/heads/main`), commit message, committer, and repo slug.
 
-#### **Stage 3: Signal / Noise Classifier (`classify_signal`)**
-Evaluates user-configured triage settings using an **Inclusive OR Model**:
+**Slack Events**:
+  * Extracts subtype (`message`, `message_changed`, `message_deleted`, `channel_topic`, `channel_purpose`, `file_share`, `reaction_added`).
+  * Extracts channel ID, user ID, `ts`, `thread_ts`, client message ID, file metadata, reaction emoji, previous text (for edits).
+  * Generates clickable permalink: `https://slack.com/archives/{channel}/p{clean_ts}`.
+  * **Post-normalization**: Resolves opaque Slack user IDs → display names via `users.info` API. Resolves channel IDs → channel names via `conversations.info` API. Results cached in-memory (`SLACK_USER_CACHE`, `SLACK_CHANNEL_CACHE`).
+  * **LLM Signal Intelligence**: Text classified by GPT-4o-mini into `signal_type` (`incident` | `debugging` | `status_update` | `discussion` | `noise`), `urgency` (`critical` | `high` | `medium` | `low` | `none`), extracted `entities`, and `reasoning`. Falls back to keyword heuristics if `OPENAI_API_KEY` unset.
+
+**Jira Webhooks**:
+  * Extracts issue key, title, issue type, priority, status, project key & name.
+  * Differentiates 8 event types with distinct summary tags:
+    - `jira:issue_created` → `Jira [KAN-3] [CREATED] (Bug/To Do): Title`
+    - `jira:issue_updated` → `Jira [KAN-3] [UPDATED] (Bug/In Progress): Title`
+    - `jira:issue_deleted` → `Jira [KAN-3] [DELETED]: Title`
+    - `comment_created` → `Jira [KAN-3] [NEW COMMENT] by Author: Comment text`
+    - `comment_updated` → `Jira [KAN-3] [COMMENT EDITED] by Author: Updated text`
+    - `comment_deleted` → `Jira [KAN-3] [COMMENT DELETED] by Author`
+    - `attachment_created` → `Jira [KAN-3] [ATTACHMENT]: error_log.txt (4096 bytes)`
+    - `worklog_created` → `Jira [KAN-3] [WORKLOG]: 2h 30m logged by Author`
+  * Author resolution: Parses `comment.author.displayName`, `attachment.author.displayName`, `worklog.author.displayName`, or `payload.user.displayName` depending on event type.
+  * Generates clickable permalink: `https://{site}.atlassian.net/browse/{key}`.
+
+#### **Step 2.5: Evidence Lifecycle (Edits & Deletions)**
+Handles mutable evidence for platforms that support message edits and deletions:
+
+**Slack**:
+  * `message_changed` → `handle_slack_edit()`: Updates existing MongoDB evidence record in-place. Sets `metadata.edited = True`, `metadata.previous_text`, appends `[edited]` to summary.
+  * `message_deleted` → `handle_slack_delete()`: Marks existing MongoDB evidence record as retracted. Sets `metadata.retracted = True`, appends `[RETRACTED]` to summary.
+
+**Jira** (Planned — Phase 2):
+  * `comment_updated` → Will update existing comment evidence in MongoDB.
+  * `comment_deleted` → Will mark existing comment evidence as retracted.
+  * `jira:issue_deleted` → Will mark all linked evidence for that issue key as retracted.
+
+#### **Step 3: Signal / Noise Classifier (`classify_signal`)**
+
+**Gmail, GitHub, Jira (Default)**: Evaluates user-configured triage settings using an **Inclusive OR Model**:
 * **Trigger 1 (Allowed Senders)**: Is the sender email/domain in `allowed_senders`?
 * **Trigger 2 (Subject Rules)**: Does the subject match `subject_contains` or `subject_starts_with`?
 * **Trigger 3 (Keyword Rules)**: Does the body/summary contain any `required_keywords`?
-* **GitHub Specific Noise Filtering**:
-  * Drops `dependabot[bot]` PRs automatically.
-  * Drops background maintenance branches: `chore/*`, `docs/*`, `style/*`, `renovate/*`.
-  * Drops redundant `push` events to non-default PR branches (since the `pull_request` event lifecycle already tracks PR activity).
+* If **ANY** trigger matches, the event is classified as an operational **Signal**. If none match, it is dropped as **Noise** (`status: "ignored"`).
 
-If **ANY** trigger matches, the event is classified as an operational **Signal**. If none match, it is dropped as **Noise** (`status: "ignored"`).
+**GitHub Specific Noise Filtering**:
+* Drops `dependabot[bot]` PRs automatically.
+* Drops background maintenance branches: `chore/*`, `docs/*`, `style/*`, `renovate/*`.
+* Drops redundant `push` events to non-default PR branches (since the `pull_request` event lifecycle already tracks PR activity).
 
-#### **Stage 4: Multi-Phase Correlation Engine (`correlate_signal`)**
+**Slack LLM-Based Noise Filtering**:
+* Filters admin subtypes (`channel_join`, `channel_leave`, `channel_archive`).
+* Rejects events where LLM classification returned `signal_type == "noise"` (social greetings, casual chatter).
+* Heuristic fallback: Short social phrases ("hey", "thanks", "ok", "👍") auto-classified as noise.
+
+#### **Step 3.5: Deterministic Correlation (Platform-Specific)**
+
+**Slack Thread Correlation** (`correlate_slack_thread`):
+* If a message is a thread reply (`thread_ts` present), queries MongoDB for the parent message's evidence record using `{"type": "slack", "metadata.ts": thread_ts, "metadata.channel_id": channel_id}`.
+* Returns the parent message's `investigation_id` for O(1) deterministic correlation.
+* Thread replies never spawn new investigations.
+
+**Jira Issue-Key Correlation** (Planned — Phase 2):
+* Events referencing an existing issue key (e.g. `KAN-3`) will correlate deterministically to any existing investigation that already has evidence from the same issue key.
+* Comments, attachments, and worklogs on an issue auto-link to the issue's existing investigation.
+
+#### **Step 4: Multi-Phase Correlation Engine (`correlate_signal`)**
 Evaluates the incoming signal against active open investigations for the tenant (`status IN ('open', 'investigating')`) using our **Phase 2 Hybrid Scoring Model**:
 $$\text{Score} = \Big( 0.40 \cdot \text{EntityScore} + 0.40 \cdot \text{VectorScore} + 0.20 \cdot \text{KeywordScore} \Big) \cdot \text{TimeDecay}$$
 * **Branch Entity Priority**: Extracts microservice identifiers directly from branch patterns (`fix/auth-gateway-pod-12-oom` $\rightarrow$ `services: {"auth-gateway-pod-12"}`).
 * If a candidate scores $\ge 0.25$, the evidence is attached directly to that existing investigation (`status: "correlated"`).
 
-#### **Stage 5: Incident Worthiness & Storage Routing (`is_incident_worthy`)**
+#### **Step 5: Incident Worthiness & Storage Routing (`is_incident_worthy`)**
 If Stage 4 returns no correlation match:
-* **Gmail Incident-Worthy Events**:
-  * **Operational System Monitoring Emails**: Emails from monitoring providers (`Datadog`, `Sentry`, `Grafana`, `Kubernetes`, `PagerDuty`, `CloudWatch`, `Prometheus`, `NewRelic`) or containing operational alert prefixes (`[ALERT]`, `[ERROR]`, `[CRITICAL]`, `incident`).
-  * **User Configured Triage Rules**: Emails matching user-configured integration settings (`allowed_senders`, `subject_starts_with`, `subject_contains`, `required_keywords`).
-  * **Result**: Spawns a new **PostgreSQL `Investigation` container** + attaches Evidence in MongoDB (`status: "created"`).
-  * **Personal Email Filtering**: Personal bank transaction alerts (`ICICI`, `CRED`, `SBI`), newsletters (`The Economist`, `Medium`, `Anaconda`, `NVIDIA`), trading digests (`Groww`, `NSE`), and job alerts (`LinkedIn`, `Indeed`, `hirist`) are filtered out from auto-creating investigations and saved directly as **Standalone Evidence in MongoDB** (`investigation_id = null`, `status: "evidence_only"`).
-* **GitHub Incident-Worthy Events**:
-  * CI Workflow Failures (`workflow_run.failure`, `cancelled`, `timed_out`).
-  * Issues labeled `bug`, `P0`, `critical`, or `blocker`.
-  * PRs on incident branches (`bug/*`, `hotfix/*`, `bugfix/*`, `incident/*`) containing critical incident keywords (`critical`, `outage`, `error`, `failed`, `leak`, `crash`, `panic`, `fatal`, `p0`, `p1`).
-  * **Result**: Spawns a new **PostgreSQL `Investigation` container** + attaches Evidence in MongoDB (`status: "created"`).
-* **Routine Signals**:
-  * Uncorrelated feature PRs (`feature/*`) or general emails are stored as **Standalone Evidence in MongoDB** (`investigation_id = null`, `status: "evidence_only"`), keeping PostgreSQL 100% clean.
+
+**Slack Incident Routing**:
+* `True` ONLY if LLM `signal_type` in (`"incident"`, `"debugging"`) AND `urgency` in (`"critical"`, `"high"`).
+* Reactions, topic changes, edits, deletes, and thread replies → `False`.
+
+**GitHub Incident Routing**:
+* CI Workflow Failures (`workflow_run.failure`, `cancelled`, `timed_out`).
+* Issues labeled `bug`, `P0`, `critical`, or `blocker`.
+* PRs on incident branches (`bug/*`, `hotfix/*`, `bugfix/*`, `incident/*`) containing critical incident keywords (`critical`, `outage`, `error`, `failed`, `leak`, `crash`, `panic`, `fatal`, `p0`, `p1`).
+* Regular PRs/commits → `False` (stored as standalone evidence).
+
+**Gmail Incident Routing**:
+* **Operational System Monitoring Emails**: Emails from monitoring providers (`Datadog`, `Sentry`, `Grafana`, `Kubernetes`, `PagerDuty`, `CloudWatch`, `Prometheus`, `NewRelic`) or containing operational alert prefixes (`[ALERT]`, `[ERROR]`, `[CRITICAL]`, `incident`).
+* **Personal Email Filtering**: Personal bank transaction alerts (`ICICI`, `CRED`, `SBI`), newsletters (`The Economist`, `Medium`, `Anaconda`, `NVIDIA`), trading digests (`Groww`, `NSE`), and job alerts (`LinkedIn`, `Indeed`, `hirist`) are filtered out and saved directly as **Standalone Evidence** (`investigation_id = null`).
+
+**Jira Incident Routing** (Current — uses generic fallback):
+* `True` if user rule matched, incident keywords present in text, or metadata priority is `critical`/`high`/`p0`/`p1`/`blocker`.
+* All other events stored as standalone evidence.
 
 ---
 
-## 🫀 5. Deep Dive: The Core Heart — Multi-Phase Correlation Engine
+## 🫀 6. Deep Dive: The Core Heart — Multi-Phase Correlation Engine
 
 The correlation engine is the core intelligence of our platform. It answers the question:
 > *"Does an incoming telemetry signal belong to an active, ongoing incident, or is it a separate issue?"*
@@ -303,7 +437,59 @@ Since $\mathbf{0.621} \ge 0.25$ threshold: **MATCH CONFIRMED (CORRELATED)**. The
 
 ---
 
-## 🔒 6. Authentication, Security & Cookie Architecture
+## 🎯 7. Platform-Specific Correlation Intelligence
+
+### 7.1 Slack Correlation Engine (Implemented ✅)
+
+Slack has the most sophisticated correlation pipeline with 3 layers:
+
+```
+ [Incoming Slack Event]
+        │
+        ▼
+ ┌───────────────────────┐
+ │  Layer 1: LLM Intel   │  GPT-4o-mini classifies text into signal_type + urgency
+ │  classify_slack_signal │  (~$0.000018/call, ~300ms, JSON response format)
+ └──────────┬────────────┘
+            │
+            ▼
+ ┌───────────────────────┐
+ │  Layer 2: Lifecycle   │  Edits → update MongoDB record in-place
+ │  handle_slack_edit    │  Deletes → mark as [RETRACTED]
+ │  handle_slack_delete  │
+ └──────────┬────────────┘
+            │
+            ▼
+ ┌───────────────────────┐
+ │  Layer 3: Deterministic│  Thread replies → O(1) parent lookup via thread_ts
+ │  correlate_slack_thread│  Returns parent investigation_id
+ └──────────┬────────────┘
+            │ (No thread match)
+            ▼
+ [Falls through to Step 4: Hybrid Correlation Engine]
+```
+
+**Key Capabilities**:
+* **LLM Signal Intelligence**: Every Slack message classified by GPT-4o-mini with heuristic fallback.
+* **Deterministic Thread Correlation**: Thread replies link to parent investigation in O(1).
+* **Evidence Mutation**: Edits update, deletions retract existing MongoDB records.
+* **User/Channel Resolution**: Opaque Slack IDs resolved to human-readable names with in-memory caching.
+
+### 7.2 Jira Correlation Engine (Planned — Phase 2 🔜)
+
+See Section 10: Jira Correlation Engine Roadmap.
+
+### 7.3 GitHub Correlation Engine (Implemented ✅)
+
+GitHub uses the generic hybrid correlation engine (Step 4) with platform-specific noise filtering and incident-worthiness rules. Branch entity extraction (`fix/auth-gateway-oom` → `services: {"auth-gateway"}`) provides strong deterministic signal for entity matching.
+
+### 7.4 Gmail Correlation Engine (Implemented ✅)
+
+Gmail uses the generic hybrid correlation engine (Step 4) with operational sender detection and personal email filtering. Monitoring provider emails (`Datadog`, `Sentry`, `PagerDuty`) are incident-worthy; personal emails are stored as standalone evidence.
+
+---
+
+## 🔒 8. Authentication, Security & Cookie Architecture
 
 ### 1. Dual-Token Authentication Architecture:
 * **Access Tokens**: Short-lived JWTs (15-minute expiration) passed via `Authorization: Bearer <token>` headers.
@@ -321,26 +507,84 @@ Integration OAuth tokens and client secrets are encrypted at rest using **Fernet
 
 ---
 
-## 🎨 7. Frontend Architecture & User Interface Design
+## 🎨 9. Frontend Architecture & User Interface Design
 
 The frontend follows a **Linear / Palantir-inspired high-density operational light theme**:
 
 ### Key Components:
 1. **Attention Deck Dashboard (`/dashboard`)**:
    * Triage view displaying **Threatened Business Targets**, active investigation metrics, and the **Active Signal Stream**.
-2. **Gmail Settings Modal (`GmailSettingsModal.tsx`)**:
+2. **Integrations Page (`/integrations`)**:
+   * 4 integration cards: **Slack**, **Jira**, **GitHub**, **Gmail**.
+   * 1-click OAuth popup connection for all platforms.
+   * Expandable drawer configurations:
+     - **Slack**: Dynamic channel list from Slack API, multi-channel checkbox selection.
+     - **Jira**: Text input for tracked project keys (dynamic project list planned).
+     - **GitHub**: Dynamic repo list from GitHub API, multi-repo checkbox selection.
+     - **Gmail**: Opens `GmailSettingsModal` for triage rule configuration.
+3. **Gmail Settings Modal (`GmailSettingsModal.tsx`)**:
    * 3-section configuration drawer:
      * **Section 1**: Allowed Senders & Domains + auto-complete suggestions.
      * **Section 2**: Keyword Rules + starter templates (`Database Outages`, `CI/CD Build Failures`, `Security Alerts`).
      * **Section 3**: Subject Rules (`Contains` & `Starts With`).
      * **Live Preview Panel**: Real-time signal matching preview against sample emails.
-3. **Interactive Evidence Detail Modal (`EvidenceDetailModal.tsx`)**:
+4. **Interactive Evidence Detail Modal (`EvidenceDetailModal.tsx`)**:
    * Formatted email & telemetry reader dialog.
    * Clicking any item in the Active Signal Stream or Evidence Feed opens full multiline email body payloads, sender avatars, timestamps, and structured metadata tags.
 
 ---
 
-## 🧪 8. Database Isolation & Testing Workflow
+## 🚀 10. Jira Correlation Engine Roadmap
+
+The Jira correlation engine will be implemented in **3 phases**, mirroring the maturity model established by the Slack correlation engine:
+
+### Phase 1: Issue-Key Deterministic Correlation (Priority: HIGH)
+
+**Goal**: Any Jira event referencing an existing issue key (`KAN-3`) should automatically link to the investigation that already tracks that issue — without hitting the hybrid scoring engine.
+
+```
+ [Incoming Jira Webhook: comment on KAN-3]
+        │
+        ▼
+ ┌─────────────────────────────┐
+ │ correlate_jira_issue_key()  │  Query MongoDB: {"type": "jira", "metadata.issue_key": "KAN-3"}
+ │ O(1) Deterministic Lookup   │  Return parent investigation_id if found
+ └──────────┬──────────────────┘
+            │ (Found) → CORRELATED
+            │ (Not Found) → Fall through to Step 4
+```
+
+**Implementation**:
+* New function `correlate_jira_issue_key(mongo_db, issue_key)` — analogous to `correlate_slack_thread()`.
+* Inserted at Step 3.5 in the pipeline for Jira events.
+* Comments, attachments, worklogs, status changes, and deletions on `KAN-3` all auto-link to the same investigation.
+
+### Phase 2: Evidence Lifecycle (Edits, Deletions, Retractions)
+
+**Goal**: Jira comment edits and deletions should mutate existing MongoDB evidence records in-place, not create duplicate entries.
+
+**Implementation**:
+* `handle_jira_comment_edit(mongo_db, issue_key, comment_id, new_body)` — analogous to `handle_slack_edit()`.
+* `handle_jira_comment_delete(mongo_db, issue_key, comment_id)` — analogous to `handle_slack_delete()`.
+* `handle_jira_issue_delete(mongo_db, issue_key)` — marks ALL evidence for the issue key as `[RETRACTED]`.
+* Inserted at Step 2.5 in the pipeline for Jira `comment_updated`, `comment_deleted`, `jira:issue_deleted` events.
+
+### Phase 3: Intelligent Incident Routing
+
+**Goal**: Replace the generic keyword-based `is_incident_worthy` fallback for Jira with structured metadata analysis.
+
+**Implementation**:
+* Route based on Jira's native structured fields rather than raw keyword scanning:
+  - **Priority-based**: `Highest`/`High` priority → incident-worthy.
+  - **Issue type-based**: `Bug`, `Incident`, `Security` → incident-worthy.
+  - **Label-based**: Labels containing `p0`, `p1`, `outage`, `incident`, `critical` → incident-worthy.
+  - **Status transition-based**: Transitions from `Open` → `Critical`/`Blocked` → incident-worthy.
+* `Task`, `Story`, `Epic` with `Medium`/`Low` priority → standalone evidence.
+* Removes reliance on keyword scanning of summary text (which produces false positives).
+
+---
+
+## 🧪 11. Database Isolation & Testing Workflow
 
 ### 1. Test Isolation:
 * Automated testing executes against an isolated MongoDB database (`oip_mongo_test`) configured in `backend/app/core/config.py` when `ENVIRONMENT == "testing"`, keeping production evidence collections 100% intact.
@@ -350,7 +594,9 @@ The frontend follows a **Linear / Palantir-inspired high-density operational lig
 
 ---
 
-## 🔮 9. Phase 3 Roadmap: Enterprise Scale
+## 🔮 12. Phase 3 Roadmap: Enterprise Scale
 
 * **Asynchronous LLM Signal Clustering**: Background worker tasks utilizing LLMs to summarize multi-evidence investigation timelines into automated root-cause diagnoses.
 * **Human Triage Feedback Loop**: Learning correlation weights dynamically based on operator actions (e.g. manually moving or splitting evidence items across investigations).
+* **Cross-Platform Correlation Intelligence**: A Jira bug referencing `auth-gateway` correlating with a Slack incident thread discussing the same service, and a GitHub CI failure on the `fix/auth-gateway` branch — all auto-linked to one investigation.
+* **Dynamic Jira Project List in UI**: Replace manual text input for tracked projects with dynamic project list fetched from Jira REST API (matching GitHub/Slack UI pattern).
