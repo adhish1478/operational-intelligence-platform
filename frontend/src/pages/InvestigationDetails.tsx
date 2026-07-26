@@ -10,18 +10,21 @@ import {
   ChevronRight,
   Send,
   Cpu,
-  ShieldAlert
+  ShieldAlert,
+  Sparkles
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { mapInvestigation, mapEvidence } from '../lib/mappers';
 import type { Severity, Evidence, EntityReference } from '../types';
 import { EvidenceDetailModal } from '../components/EvidenceDetailModal';
+import { AiDiagnosisModal } from '../components/AiDiagnosisModal';
 
 export const InvestigationDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
 
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
+  const [isRcaModalOpen, setIsRcaModalOpen] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnoseError, setDiagnoseError] = useState<string | null>(null);
@@ -206,16 +209,26 @@ export const InvestigationDetails: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* AI Diagnose Action Trigger */}
+          {/* AI Forensics Modal Trigger */}
+          <button 
+            onClick={() => setIsRcaModalOpen(true)}
+            className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white text-body-sm font-semibold rounded-lg transition-all shadow flex items-center gap-2"
+          >
+            <Sparkles className="w-4 h-4 text-indigo-200 animate-pulse" />
+            <span>AI Forensics & RCA</span>
+          </button>
+
+          {/* Quick AI Diagnose Trigger */}
           <button 
             onClick={handleRunDiagnosis}
             disabled={diagnosing}
-            className="px-3 py-1.5 bg-primary hover:bg-slate-800 text-white text-body-sm font-semibold rounded transition-colors disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+            className="px-3 py-1.5 border border-outline-variant hover:bg-surface-high text-body-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5 text-on-surface"
           >
             <Cpu className={`w-4 h-4 ${diagnosing ? 'animate-spin' : ''}`} />
-            <span>{diagnosing ? 'Running Diagnosis...' : 'Run AI Diagnostics'}</span>
+            <span>{diagnosing ? 'Diagnosing...' : 'Re-Run AI'}</span>
           </button>
-          <button className="px-3 py-1.5 border border-outline-variant hover:bg-surface-high text-body-sm font-semibold rounded transition-colors text-on-surface">
+
+          <button className="px-3 py-1.5 border border-outline-variant hover:bg-surface-high text-body-sm font-semibold rounded-lg transition-colors text-on-surface">
             Mark Resolved
           </button>
         </div>
@@ -235,7 +248,16 @@ export const InvestigationDetails: React.FC = () => {
         <div className="lg:col-span-4 flex flex-col gap-4 min-h-0 overflow-y-auto pr-1">
           <div className="bg-surface border border-outline-variant rounded-lg p-4 space-y-4 shrink-0">
             <div>
-              <h3 className="text-headline-sm text-outline uppercase tracking-wider font-bold mb-1.5">Root Cause Summary</h3>
+              <div className="flex items-center justify-between mb-1.5">
+                <h3 className="text-headline-sm text-outline uppercase tracking-wider font-bold">Root Cause Summary</h3>
+                <button
+                  onClick={() => setIsRcaModalOpen(true)}
+                  className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 transition-colors"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Full AI Report</span>
+                </button>
+              </div>
               <p className="text-body-sm text-on-surface">{investigation.description || 'Awaiting description analysis.'}</p>
             </div>
 
@@ -465,6 +487,24 @@ export const InvestigationDetails: React.FC = () => {
         </div>
 
       </div>
+
+      {/* AI Diagnosis Forensic Modal */}
+      <AiDiagnosisModal
+        isOpen={isRcaModalOpen}
+        onClose={() => setIsRcaModalOpen(false)}
+        investigationTitle={investigation.title}
+        severity={investigation.severity}
+        suggestedAction={investigation.suggestedAction}
+        evidenceList={evidenceList}
+        onRunDiagnosis={handleRunDiagnosis}
+        isDiagnosing={diagnosing}
+        onShareSlack={handleShareSlack}
+        isSharingSlack={sharingSlack}
+        slackPostedChannel={slackPostedChannel}
+        onEscalateJira={handleEscalateJira}
+        isEscalatingJira={escalatingJira}
+        jiraTicket={jiraTicket}
+      />
     </div>
   );
 };

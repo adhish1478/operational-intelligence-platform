@@ -7,7 +7,7 @@ class InvestigationBase(BaseModel):
     title: str = Field(..., min_length=3, max_length=500)
     description: str | None = Field(None)
     severity : Literal['critical','high','medium','low'] = Field('medium')
-    status: Literal["open", "investigating", "resolved"] = Field("open")
+    status: Literal["open", "investigating", "resolved", "closed"] = Field("open")
     assigned_to_id: uuid.UUID | None = Field(None)
     suggestion_action : str | None = Field(None)
 
@@ -18,7 +18,7 @@ class InvestigationUpdate(BaseModel):
     title: str | None = Field(None, min_length=3, max_length=255)
     description: str | None = Field(None)
     severity: Literal['critical','high','medium','low'] | None= Field(None)
-    status: Literal['open','investigating','resolved'] | None= Field(None)
+    status: Literal['open', 'investigating', 'resolved', 'closed'] | None= Field(None)
     assigned_to_id: uuid.UUID | None = Field(None)
     suggestion_action : str | None = Field(None)
     
