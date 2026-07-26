@@ -32,6 +32,7 @@ export const InvestigationsQueue: React.FC = () => {
       case 'open': return 'bg-error/10 text-error';
       case 'investigating': return 'bg-warning/10 text-warning';
       case 'resolved': return 'bg-success/10 text-success';
+      case 'closed': return 'bg-slate-200 text-slate-700 font-semibold';
       default: return 'bg-slate-100 text-slate-600';
     }
   };
@@ -121,7 +122,7 @@ export const InvestigationsQueue: React.FC = () => {
 
         {/* Status filter tabs */}
         <div className="flex items-center gap-1 border-l border-outline-variant pl-3">
-          {['all', 'open', 'investigating', 'resolved'].map((stat) => (
+          {['all', 'open', 'investigating', 'resolved', 'closed'].map((stat) => (
             <button
               key={stat}
               onClick={() => setStatusFilter(stat)}

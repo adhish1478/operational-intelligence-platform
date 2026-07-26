@@ -8,6 +8,7 @@ import {
   Mail,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
   Send,
   ShieldAlert,
   Sparkles
@@ -15,7 +16,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { mapInvestigation, mapEvidence } from '../lib/mappers';
-import type { Severity, Evidence, EntityReference } from '../types';
+import type { Severity, Evidence, EntityReference, InvestigationStatus } from '../types';
 import { EvidenceDetailModal } from '../components/EvidenceDetailModal';
 import { AiDiagnosisModal } from '../components/AiDiagnosisModal';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
@@ -34,15 +35,16 @@ export const InvestigationDetails: React.FC = () => {
   const [slackPostedChannel, setSlackPostedChannel] = useState<string | null>(null);
   const [slackError, setSlackError] = useState<string | null>(null);
 
+  const [isStatusMenuOpen, setIsStatusMenuOpen] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [escalatingJira, setEscalatingJira] = useState(false);
   const [jiraTicket, setJiraTicket] = useState<{ key: string; url: string } | null>(null);
   const [jiraError, setJiraError] = useState<string | null>(null);
   
-  const handleToggleResolve = async () => {
+  const handleSetStatus = async (newStatus: InvestigationStatus) => {
     if (!id || !investigation) return;
+    setIsStatusMenuOpen(false);
     setResolving(true);
-    const newStatus = investigation.status === 'resolved' ? 'open' : 'resolved';
     try {
       await api.patch(`/investigations/${id}`, { status: newStatus });
       const statusEvt = {
@@ -54,7 +56,7 @@ export const InvestigationDetails: React.FC = () => {
       setTimelineEvents(prev => [...prev, statusEvt]);
       await refetchInv();
     } catch (err: any) {
-      alert(err.response?.data?.detail || err.message || 'Failed to update investigation status.');
+      alert(err.response?.data?.detail || err.message || 'Failed to update status.');
     } finally {
       setResolving(false);
     }
@@ -240,25 +242,68 @@ export const InvestigationDetails: React.FC = () => {
             <span>AI Forensics & RCA</span>
           </button>
 
-          {/* Functional Resolution Toggle */}
-          <button 
-            onClick={handleToggleResolve}
-            disabled={resolving}
-            className={`px-3.5 py-1.5 border font-semibold text-body-sm rounded-lg transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50 ${
-              investigation.status === 'resolved'
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
-                : 'border-outline-variant hover:bg-surface-high text-on-surface'
-            }`}
-          >
-            <CheckCircle className={`w-4 h-4 ${investigation.status === 'resolved' ? 'text-emerald-600' : 'text-slate-400'}`} />
-            <span>
-              {resolving 
-                ? 'Updating...' 
-                : investigation.status === 'resolved' 
-                ? 'Resolved (Reopen)' 
-                : 'Mark Resolved'}
-            </span>
-          </button>
+          {/* Status Dropdown Selector */}
+          <div className="relative">
+            <button 
+              onClick={() => setIsStatusMenuOpen(!isStatusMenuOpen)}
+              disabled={resolving}
+              className={`px-3.5 py-1.5 border font-semibold text-body-sm rounded-lg transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50 ${
+                investigation.status === 'resolved'
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                  : investigation.status === 'closed'
+                  ? 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                  : investigation.status === 'investigating'
+                  ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+                  : 'border-outline-variant hover:bg-surface-high text-on-surface'
+              }`}
+            >
+              <CheckCircle className={`w-4 h-4 ${
+                investigation.status === 'resolved' ? 'text-emerald-600' :
+                investigation.status === 'closed' ? 'text-slate-500' :
+                investigation.status === 'investigating' ? 'text-amber-500' : 'text-slate-400'
+              }`} />
+              <span className="capitalize">
+                {resolving ? 'Updating...' : `Status: ${investigation.status}`}
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 opacity-60 ml-0.5" />
+            </button>
+
+            {isStatusMenuOpen && (
+              <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-xl py-1 z-30 font-sans">
+                <div className="px-3 py-1 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-100">
+                  Update Incident Status
+                </div>
+                <button
+                  onClick={() => handleSetStatus('open')}
+                  className="w-full px-3 py-2 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-2 text-slate-800"
+                >
+                  <span className="w-2 h-2 rounded-full bg-red-500" />
+                  <span>Open</span>
+                </button>
+                <button
+                  onClick={() => handleSetStatus('investigating')}
+                  className="w-full px-3 py-2 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-2 text-slate-800"
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  <span>Investigating</span>
+                </button>
+                <button
+                  onClick={() => handleSetStatus('resolved')}
+                  className="w-full px-3 py-2 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-2 text-slate-800"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>Resolved</span>
+                </button>
+                <button
+                  onClick={() => handleSetStatus('closed')}
+                  className="w-full px-3 py-2 text-left text-xs font-semibold hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100 text-slate-700"
+                >
+                  <span className="w-2 h-2 rounded-full bg-slate-400" />
+                  <span>Closed (Archive)</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
