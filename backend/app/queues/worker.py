@@ -8,7 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.ingest.services import correlate_and_process
+from app.db.mongo import get_mongo_db
+from app.ingest.services import IngestService
+from app.integrations.models import Integration
+from sqlalchemy import select
 from app.queues.circuit_breaker import CircuitBreaker, CircuitBreakerOpenException
 from app.queues.rabbitmq import RabbitMQManager, QUEUE_INGEST, rabbitmq_manager
 
@@ -67,10 +70,23 @@ class IngestEventWorker:
             # 2. Process Telemetry Ingestion in database session
             logger.info(f"Processing event {event_id} ({platform}) [Attempt #{retry_count + 1}]...")
             try:
-                organization_id = uuid.UUID(org_id_str) if org_id_str else uuid.uuid4()
+                organization_id = uuid.UUID(org_id_str) if org_id_str else None
+                mongo_db = get_mongo_db()
                 
                 async with AsyncSessionLocal() as db:
-                    await correlate_and_process(db, platform, payload, organization_id)
+                    stmt = select(Integration).where(
+                        Integration.platform == platform,
+                        Integration.status == "active"
+                    )
+                    if organization_id:
+                        stmt = stmt.where(Integration.organization_id == organization_id)
+                    res = await db.execute(stmt)
+                    integration = res.scalars().first()
+                    
+                    if not integration:
+                        raise ValueError(f"No active integration found for platform '{platform}'")
+
+                    await IngestService.correlate_and_process(db, mongo_db, integration, payload)
                 
                 # Successful execution -> record circuit success
                 self.circuit_breaker.record_success()

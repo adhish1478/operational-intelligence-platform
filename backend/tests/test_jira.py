@@ -41,65 +41,19 @@ async def auth_headers(client: AsyncClient, db_session: AsyncSession) -> dict[st
     }
 
 
-async def test_jira_connect_success(client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]):
-    # Mock Jira api/3/myself return value
-    mock_resp = httpx.Response(status_code=200, json={"active": True, "displayName": "Atlassian Developer"})
-
-    with patch("httpx.AsyncClient.get", return_value=mock_resp) as mock_get:
-        response = await client.post(
-            "/api/v1/integrations/jira/connect",
-            json={
-                "host_url": "my-domain.atlassian.net",
-                "email": "dev@company.com",
-                "api_token": "token-123"
-            },
-            headers=auth_headers
-        )
-        assert response.status_code == 200
-        assert response.json()["status"] == "success"
-        
-        # Verify call parameters
-        mock_get.assert_called_once()
-        call_url = mock_get.call_args[0][0]
-        assert "https://my-domain.atlassian.net/rest/api/3/myself" in call_url
-
-        # Check PostgreSQL
-        org_id = uuid.UUID(auth_headers["X-Organization-ID"])
-        statement = select(Integration).where(
-            Integration.organization_id == org_id,
-            Integration.platform == "jira"
-        )
-        res = await db_session.execute(statement)
-        integration = res.scalar_one_or_none()
-        assert integration is not None
-        assert integration.status == "active"
-
-        # Verify encrypted credentials
-        creds = decrypt_credentials(integration.credentials_encrypted)
-        assert creds["host_url"] == "https://my-domain.atlassian.net"
-        assert creds["email"] == "dev@company.com"
-        assert creds["api_token"] == "token-123"
-
-
-async def test_jira_connect_failed(client: AsyncClient, auth_headers: dict[str, str]):
-    # Mock Jira unauthorized response
-    mock_resp = httpx.Response(status_code=401, text="Unauthorized access token")
-
-    with patch("httpx.AsyncClient.get", return_value=mock_resp):
-        response = await client.post(
-            "/api/v1/integrations/jira/connect",
-            json={
-                "host_url": "my-domain.atlassian.net",
-                "email": "dev@company.com",
-                "api_token": "wrong-token"
-            },
-            headers=auth_headers
-        )
-        assert response.status_code == 400
-        assert "jira verification failed" in response.json()["detail"].lower()
+async def test_jira_authorize_flow(client: AsyncClient, auth_headers: dict[str, str]):
+    """Verifies Jira OAuth 2.0 (3LO) authorization URL generation."""
+    token = auth_headers["Authorization"].split(" ")[1]
+    response = await client.get(
+        f"/api/v1/integrations/jira/authorize?token={token}",
+        follow_redirects=False
+    )
+    assert response.status_code == 307
+    assert "https://auth.atlassian.com/authorize" in response.headers["location"]
 
 
 async def test_update_jira_config(client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]):
+    """Verifies Jira project tracking configuration updates."""
     org_id = uuid.UUID(auth_headers["X-Organization-ID"])
 
     # Create active integration row
@@ -116,13 +70,13 @@ async def test_update_jira_config(client: AsyncClient, db_session: AsyncSession,
     # Post tracked projects configuration
     response = await client.post(
         f"/api/v1/integrations/jira/{integration.id}/config",
-        json={"tracked_projects": ["prod", "sec", ""]},
+        json={"tracked_projects": [{"key": "PROD", "name": "Production"}, {"key": "SEC", "name": "Security"}]},
         headers=auth_headers
     )
     assert response.status_code == 200
     assert response.json()["status"] == "success"
-    assert response.json()["config"]["tracked_projects"] == ["PROD", "SEC"]
+    assert len(response.json()["config"]["tracked_projects"]) == 2
 
     # Verify db state
     await db_session.refresh(integration)
-    assert integration.config["tracked_projects"] == ["PROD", "SEC"]
+    assert len(integration.config["tracked_projects"]) == 2

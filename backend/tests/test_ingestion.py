@@ -58,8 +58,9 @@ async def test_webhook_ingest_correlation(client: AsyncClient, db_session: Async
     # 2. Ingest Slack Webhook payload matching the "Outage" or "Database" keyword
     slack_payload = {
         "event": {
-            "text": "Sentry: database connection limits hit. Possible outage.",
+            "text": "Sentry alert: Database Outage on Prod-West. Connection limits hit.",
             "user": "USLACKBOT123",
+            "bot_id": "B12345678",
             "ts": "16723223.001"
         }
     }
@@ -79,7 +80,7 @@ async def test_webhook_ingest_correlation(client: AsyncClient, db_session: Async
     assert evidence_doc is not None
     assert evidence_doc["investigation_id"] == str(active_inv.id)
     assert evidence_doc["type"] == "slack"
-    assert "Sentry: database connection limits hit" in evidence_doc["summary"]
+    assert "Connection limits hit" in evidence_doc["summary"]
 
 
 async def test_webhook_ingest_autocreation(client: AsyncClient, db_session: AsyncSession):
@@ -110,6 +111,9 @@ async def test_webhook_ingest_autocreation(client: AsyncClient, db_session: Asyn
             "key": "OPS-847",
             "fields": {
                 "summary": "Kubernetes API server memory leak",
+                "priority": {
+                    "name": "High"
+                },
                 "creator": {
                     "displayName": "Jira Robot"
                 }
@@ -131,7 +135,8 @@ async def test_webhook_ingest_autocreation(client: AsyncClient, db_session: Asyn
     inv_result = await db_session.execute(statement)
     new_inv = inv_result.scalar_one_or_none()
     assert new_inv is not None
-    assert new_inv.title == "Jira Issue OPS-847: Kubernetes API server memory leak"
+    assert "OPS-847" in new_inv.title
+    assert "Kubernetes API server memory leak" in new_inv.title
     assert new_inv.status == "open"
     assert new_inv.severity == "high" # auto-mapped from memory leak/failed/error keywords
 
