@@ -35,7 +35,7 @@ export const Integrations: React.FC = () => {
   const [savingChannel, setSavingChannel] = useState(false);
 
   // Jira custom config states
-  const [selectedJiraProjects, setSelectedJiraProjects] = useState<string>('');
+  const [selectedJiraProjectKeys, setSelectedJiraProjectKeys] = useState<string[]>([]);
   const [savingJiraProjects, setSavingJiraProjects] = useState(false);
 
   // 1. Fetch configured integrations
@@ -93,15 +93,23 @@ export const Integrations: React.FC = () => {
 
   // Retrieve active Jira configuration
   const jiraConfig = configuredList.find((c: any) => c.platform === 'jira');
+  const jiraConnectedId = jiraConfig?.id;
+
+  // Fetch projects from Jira REST API via backend
+  const { data: jiraProjectList, isLoading: isLoadingJiraProjects } = useQuery({
+    queryKey: ['jira-projects', jiraConnectedId],
+    queryFn: () => api.get(`/integrations/jira/${jiraConnectedId}/projects`),
+    enabled: !!jiraConnectedId && expandedPlatform === 'jira'
+  });
 
   // Sync selected Jira project keys state with loaded preferences
   useEffect(() => {
-    if (jiraConfig?.config?.tracked_projects) {
-      setSelectedJiraProjects(jiraConfig.config.tracked_projects.join(', '));
+    if (jiraConfig?.config?.tracked_projects && Array.isArray(jiraConfig.config.tracked_projects)) {
+      setSelectedJiraProjectKeys(jiraConfig.config.tracked_projects);
     } else {
-      setSelectedJiraProjects('');
+      setSelectedJiraProjectKeys([]);
     }
-  }, [jiraConfig?.config?.tracked_projects]);
+  }, [JSON.stringify(jiraConfig?.config)]);
 
   // Listen for OAuth completion messages from popup windows
   useEffect(() => {
@@ -442,34 +450,85 @@ export const Integrations: React.FC = () => {
               {/* Expanded Jira Project Selection Drawer */}
               {connector.platform === 'jira' && isConnected && expandedPlatform === 'jira' && (
                 <div className="mt-2 border-t border-outline-variant/60 pt-4 space-y-3">
-                  <div className="flex flex-col gap-1">
-                    <h4 className="text-[12px] font-bold text-on-surface uppercase tracking-wider">Tracked Jira Projects</h4>
-                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
-                      Enter a list of comma-separated project keys (e.g. PROD, INFRA) to monitor.
-                    </p>
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-0.5">
+                      <h4 className="text-[12px] font-bold text-on-surface uppercase tracking-wider">Tracked Jira Projects</h4>
+                      <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                        Select Jira projects to monitor for issue, comment, and lifecycle telemetry events.
+                      </p>
+                    </div>
+                    {jiraProjectList?.projects && jiraProjectList.projects.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allKeys = jiraProjectList.projects.map((p: any) => p.key);
+                          if (selectedJiraProjectKeys.length === allKeys.length) {
+                            setSelectedJiraProjectKeys([]);
+                          } else {
+                            setSelectedJiraProjectKeys(allKeys);
+                          }
+                        }}
+                        className="text-[11px] font-medium text-primary hover:underline"
+                      >
+                        {selectedJiraProjectKeys.length === jiraProjectList.projects.length ? 'Deselect All' : 'Select All'}
+                      </button>
+                    )}
                   </div>
 
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      placeholder="e.g. PROD, INFRA, SECURITY"
-                      value={selectedJiraProjects}
-                      onChange={(e) => setSelectedJiraProjects(e.target.value)}
-                      className="w-full text-[12px] rounded border border-outline-variant bg-surface-low p-2.5 text-on-surface focus:outline-none focus:ring-1 focus:ring-primary font-mono placeholder:text-outline-variant/60"
-                    />
+                  <div className="max-h-48 overflow-y-auto space-y-1.5 rounded border border-outline-variant bg-surface-low p-2.5">
+                    {isLoadingJiraProjects ? (
+                      <div className="flex items-center gap-2 py-4 justify-center text-outline text-[12px]">
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                        <span>Fetching projects from Jira REST API...</span>
+                      </div>
+                    ) : !jiraProjectList?.projects || jiraProjectList.projects.length === 0 ? (
+                      <p className="text-[12px] text-outline p-2 text-center">No projects found in this Jira workspace.</p>
+                    ) : (
+                      jiraProjectList.projects.map((project: any) => {
+                        const isChecked = selectedJiraProjectKeys.includes(project.key);
+                        return (
+                          <label
+                            key={project.key}
+                            className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors text-[12px] ${
+                              isChecked ? 'bg-primary/10 border border-primary/20 text-on-surface font-medium' : 'hover:bg-surface-high text-on-surface-variant'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 overflow-hidden pr-2">
+                              <span className="font-mono font-bold text-[11px] px-1.5 py-0.5 rounded bg-surface-high text-primary border border-outline-variant/40">
+                                {project.key}
+                              </span>
+                              <span className="truncate" title={project.name}>{project.name}</span>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedJiraProjectKeys([...selectedJiraProjectKeys, project.key]);
+                                } else {
+                                  setSelectedJiraProjectKeys(selectedJiraProjectKeys.filter(k => k !== project.key));
+                                }
+                              }}
+                              className="rounded border-outline-variant text-primary focus:ring-primary h-3.5 w-3.5"
+                            />
+                          </label>
+                        );
+                      })
+                    )}
                   </div>
 
                   <div className="flex items-center justify-between pt-2 border-t border-outline-variant/40">
-                    <span className="text-[11px] text-outline font-mono truncate max-w-[200px]" title={selectedJiraProjects}>
-                      {selectedJiraProjects ? `Projects: ${selectedJiraProjects}` : 'Monitoring all projects'}
+                    <span className="text-[11px] text-outline font-mono truncate max-w-[220px]">
+                      {selectedJiraProjectKeys.length > 0
+                        ? `Tracking ${selectedJiraProjectKeys.length} project(s): ${selectedJiraProjectKeys.join(', ')}`
+                        : 'Monitoring all projects (default)'}
                     </span>
                     <button
                       onClick={async () => {
                         setSavingJiraProjects(true);
                         try {
-                          const projectList = selectedJiraProjects.split(',').map(k => k.trim()).filter(Boolean);
                           await api.post(`/integrations/jira/${connectedId}/config`, {
-                            tracked_projects: projectList
+                            tracked_projects: selectedJiraProjectKeys
                           });
                           await refetch();
                           setExpandedPlatform(null);
