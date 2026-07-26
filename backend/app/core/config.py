@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str | None = None
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/gmail/callback"
 
+    # Jira OAuth 2.0 (3LO) Settings
+    JIRA_CLIENT_ID: str | None = None
+    JIRA_CLIENT_SECRET: str | None = None
+    JIRA_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/jira/callback"
+
 
     # Token Lifespans
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15

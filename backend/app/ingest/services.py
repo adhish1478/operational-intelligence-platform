@@ -13,10 +13,264 @@ from app.evidence.services import EvidenceService
 from app.core.config import settings
 
 
+import httpx
+
 def get_ist_time_str() -> str:
     """Returns current time in IST timezone (+05:30)."""
     ist = zoneinfo.ZoneInfo("Asia/Kolkata")
     return datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S IST")
+
+
+# In-memory deduplication cache for incoming telemetry event IDs
+PROCESSED_EVENT_IDS: set[str] = set()
+
+# In-memory user cache for Slack user ID resolution (e.g. U08BXYZ123 -> "Adhish Aravind")
+SLACK_USER_CACHE: dict[str, str] = {}
+
+# In-memory channel cache for Slack channel ID resolution (e.g. C0BKV7U95CY -> "all-oip-org")
+SLACK_CHANNEL_CACHE: dict[str, str] = {}
+
+
+async def resolve_slack_channel_name(access_token: str | None, channel_id: str, config: dict | None = None) -> str:
+    """
+    Resolves Slack channel ID (e.g. C0BKV7U95CY) to channel name (e.g. "all-oip-org").
+    Caches resolved names in memory.
+    """
+    if not channel_id:
+        return "general"
+
+    if channel_id in SLACK_CHANNEL_CACHE:
+        return SLACK_CHANNEL_CACHE[channel_id]
+
+    # Check integration config tracked_channels list first
+    if config and config.get("tracked_channels"):
+        for ch in config.get("tracked_channels", []):
+            if isinstance(ch, dict) and ch.get("id") == channel_id:
+                name = ch.get("name", channel_id)
+                SLACK_CHANNEL_CACHE[channel_id] = name
+                return name
+
+    # Call Slack conversations.info API using existing channels:read / groups:read scopes
+    if access_token:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    f"https://slack.com/api/conversations.info?channel={channel_id}",
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                data = resp.json()
+                if data.get("ok"):
+                    ch_name = data.get("channel", {}).get("name")
+                    if ch_name:
+                        SLACK_CHANNEL_CACHE[channel_id] = ch_name
+                        return ch_name
+        except Exception:
+            pass
+
+    return channel_id
+
+
+async def resolve_slack_user_name(access_token: str | None, user_id: str) -> str:
+    """
+    Resolves Slack user ID (e.g. U08BXYZ123) to real name using Slack users.info API.
+    Caches resolved names in memory.
+    """
+    if not user_id or not user_id.startswith("U"):
+        return user_id or "Slack User"
+
+    if user_id in SLACK_USER_CACHE:
+        return SLACK_USER_CACHE[user_id]
+
+    if not access_token:
+        return user_id
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"https://slack.com/api/users.info?user={user_id}",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            data = resp.json()
+            if data.get("ok"):
+                user_obj = data.get("user", {})
+                profile = user_obj.get("profile", {})
+                real_name = profile.get("real_name") or profile.get("display_name") or user_obj.get("name")
+                if real_name:
+                    display = f"{real_name} ({user_id})"
+                    SLACK_USER_CACHE[user_id] = display
+                    return display
+    except Exception:
+        pass
+
+async def classify_slack_signal(text: str, channel_name: str = "") -> dict[str, Any]:
+    """
+    LLM-powered signal intelligence for Slack using GPT-4o-mini.
+    Returns structured dict:
+    {
+      "signal_type": "incident" | "debugging" | "status_update" | "discussion" | "noise",
+      "urgency": "critical" | "high" | "medium" | "low" | "none",
+      "entities": ["list of service names, systems, error codes, or components mentioned"],
+      "reasoning": "brief 1-sentence reason"
+    }
+    Falls back to heuristic classification if OPENAI_API_KEY is not set or request fails.
+    """
+    if not text or not text.strip():
+        return {"signal_type": "noise", "urgency": "none", "entities": [], "reasoning": "Empty text"}
+
+    if settings.OPENAI_API_KEY:
+        try:
+            prompt = (
+                "You are an operational intelligence classifier for an engineering team's Slack messages.\n"
+                "Analyze the Slack message and classify it into JSON format:\n"
+                "{\n"
+                '  "signal_type": "incident" | "debugging" | "status_update" | "discussion" | "noise",\n'
+                '  "urgency": "critical" | "high" | "medium" | "low" | "none",\n'
+                '  "entities": ["list of service names, systems, error codes, or components mentioned"],\n'
+                '  "reasoning": "brief 1-sentence reason"\n'
+                "}\n\n"
+                "Definitions:\n"
+                "- incident: active outage, severe error, or system failure\n"
+                "- debugging: active troubleshooting, investigating logs/metrics, or checking issues\n"
+                "- status_update: progress, hotfix deploy, rollback, or resolution update\n"
+                "- discussion: technical conversation or architectural talk, non-urgent\n"
+                "- noise: casual greetings (hey, hi, good morning, thanks, lunch), social chatter, or administrative logs\n\n"
+                f"Channel: #{channel_name}\n"
+                f'Message: "{text[:500]}"'
+            )
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                response = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "gpt-4o-mini",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "response_format": {"type": "json_object"},
+                        "temperature": 0.1,
+                        "max_tokens": 150
+                    }
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    import json
+                    parsed_llm = json.loads(content)
+                    if isinstance(parsed_llm, dict) and "signal_type" in parsed_llm:
+                        return parsed_llm
+        except Exception:
+            pass
+
+    # Fallback heuristic classification
+    lower_text = text.lower()
+    
+    # Check social noise
+    social_greetings = {"hey", "hi", "hello", "thanks", "thank you", "good morning", "good night", "lunch", "brb", "lol", "haha", "ok", "okay", "sure", "👍"}
+    words = lower_text.strip().split()
+    if lower_text.strip() in social_greetings or (len(words) <= 2 and not any("-" in w for w in words)):
+        return {"signal_type": "noise", "urgency": "none", "entities": [], "reasoning": "Heuristic social noise"}
+
+    # Extract entities via regex
+    entities_dict = IngestService.extract_entities(text)
+    entities = list(entities_dict["services"].union(entities_dict["errors"]).union(entities_dict["alert_ids"]))
+
+    incident_kw = {"down", "broken", "outage", "crashed", "unresponsive", "502", "503", "504", "oom", "killed", "failed", "panic", "critical"}
+    debugging_kw = {"checking", "investigating", "logs", "metrics", "seeing errors", "spike", "latency", "timeout", "bug"}
+    status_kw = {"deploying", "rolled back", "reverted", "monitoring", "fixed", "resolved", "root cause", "hotfix"}
+
+    if any(kw in lower_text for kw in incident_kw):
+        return {"signal_type": "incident", "urgency": "high", "entities": entities, "reasoning": "Heuristic incident match"}
+    elif any(kw in lower_text for kw in status_kw):
+        return {"signal_type": "status_update", "urgency": "low", "entities": entities, "reasoning": "Heuristic status match"}
+    elif any(kw in lower_text for kw in debugging_kw):
+        return {"signal_type": "debugging", "urgency": "medium", "entities": entities, "reasoning": "Heuristic debugging match"}
+
+    return {"signal_type": "discussion", "urgency": "low", "entities": entities, "reasoning": "Heuristic discussion match"}
+
+
+async def correlate_slack_thread(
+    mongo_db: AsyncIOMotorDatabase,
+    thread_ts: str | None,
+    channel_id: str | None
+) -> str | None:
+    """
+    Thread-based deterministic correlation for Slack messages.
+    If a message is a thread reply, find the parent message's evidence record in MongoDB
+    and return its investigation_id.
+    """
+    if not thread_ts:
+        return None
+
+    query = {"type": "slack", "metadata.ts": thread_ts}
+    if channel_id:
+        query["metadata.channel_id"] = channel_id
+
+    parent_evidence = await mongo_db.evidence.find_one(query)
+    if parent_evidence and parent_evidence.get("investigation_id"):
+        return parent_evidence["investigation_id"]
+
+    return None
+
+
+async def handle_slack_edit(
+    mongo_db: AsyncIOMotorDatabase,
+    channel_id: str | None,
+    original_ts: str | None,
+    new_text: str,
+    previous_text: str | None
+) -> str | None:
+    """Update existing evidence when a message is edited."""
+    if not original_ts:
+        return None
+
+    existing = await mongo_db.evidence.find_one({
+        "type": "slack",
+        "metadata.ts": original_ts,
+        "metadata.channel_id": channel_id
+    })
+    if existing:
+        doc_id = existing["_id"]
+        await mongo_db.evidence.update_one(
+            {"_id": doc_id},
+            {"$set": {
+                "metadata.text": new_text,
+                "metadata.body": new_text,
+                "metadata.edited": True,
+                "metadata.previous_text": previous_text,
+                "summary": f"{new_text[:100]} [edited]"
+            }}
+        )
+        return str(doc_id)
+    return None
+
+
+async def handle_slack_delete(
+    mongo_db: AsyncIOMotorDatabase,
+    channel_id: str | None,
+    deleted_ts: str | None
+) -> str | None:
+    """Mark existing evidence as retracted when message is deleted."""
+    if not deleted_ts:
+        return None
+
+    existing = await mongo_db.evidence.find_one({
+        "type": "slack",
+        "metadata.ts": deleted_ts,
+        "metadata.channel_id": channel_id
+    })
+    if existing:
+        doc_id = existing["_id"]
+        old_summary = existing.get("summary", "")
+        await mongo_db.evidence.update_one(
+            {"_id": doc_id},
+            {"$set": {
+                "metadata.retracted": True,
+                "summary": f"{old_summary} [RETRACTED]"
+            }}
+        )
+        return str(doc_id)
+    return None
 
 
 class IngestService:
@@ -310,7 +564,13 @@ class IngestService:
             event = raw_payload.get("event", {})
             channel_id = event.get("channel")
             configured_channel_id = config.get("channel_id")
-            if configured_channel_id and channel_id and channel_id != configured_channel_id:
+            tracked_channels = config.get("tracked_channels", [])
+
+            if tracked_channels:
+                allowed_ids = [c.get("id") if isinstance(c, dict) else str(c) for c in tracked_channels]
+                if channel_id and channel_id not in allowed_ids:
+                    return False, f"Slack event channel '{channel_id}' is not in the tracked channels list."
+            elif configured_channel_id and channel_id and channel_id != configured_channel_id:
                 return False, f"Slack event channel '{channel_id}' does not match configured triage channel."
         elif platform == "jira":
             issue = raw_payload.get("issue", {})
@@ -332,13 +592,7 @@ class IngestService:
         source_url = None
         metadata = payload
 
-        if platform == "slack":
-            event = payload.get("event", {})
-            text = event.get("text", "")
-            summary = f"{text[:100]}..." if len(text) > 100 else text
-            author_name = event.get("user")
-            
-        elif platform == "github":
+        if platform == "github":
             # 1. Pull Request Event
             pr = payload.get("pull_request", {})
             if pr:
@@ -417,14 +671,183 @@ class IngestService:
                     repo_name = payload.get("repository", {}).get("full_name", "Unknown Repo")
                     summary = f"GitHub Event on repository: {repo_name}"
 
+        elif platform == "slack":
+            event = payload.get("event", {})
+            event_type = event.get("type", "message")
+            subtype = event.get("subtype")
+
+            user = event.get("user") or payload.get("user_id") or "Slack User"
+            channel = event.get("channel") or payload.get("channel_id") or "general"
+            ts = event.get("ts", "")
+            previous_text = None
+            files_meta = []
+
+            if subtype == "message_changed":
+                msg = event.get("message", {})
+                text = msg.get("text", "")
+                user = msg.get("user") or user
+                ts = msg.get("ts") or ts
+                prev_msg = event.get("previous_message", {})
+                previous_text = prev_msg.get("text", "")
+                summary_prefix = f"Slack [edited message] in #{channel}"
+            elif subtype == "message_deleted":
+                prev_msg = event.get("previous_message", {})
+                text = prev_msg.get("text", "")
+                user = prev_msg.get("user") or user
+                ts = event.get("deleted_ts") or ts
+                summary_prefix = f"Slack [deleted message] in #{channel}"
+            elif subtype == "channel_topic":
+                topic = event.get("topic", "")
+                text = f"Channel topic updated: {topic}"
+                summary_prefix = f"Slack [topic change] in #{channel}"
+            elif subtype == "channel_purpose":
+                purpose = event.get("purpose", "")
+                text = f"Channel purpose updated: {purpose}"
+                summary_prefix = f"Slack [purpose change] in #{channel}"
+            elif subtype == "file_share":
+                text = event.get("text", "Shared a file")
+                files = event.get("files", [])
+                files_meta = [
+                    {
+                        "id": f.get("id"),
+                        "name": f.get("name"),
+                        "title": f.get("title"),
+                        "filetype": f.get("filetype"),
+                        "size": f.get("size")
+                    }
+                    for f in files if isinstance(f, dict)
+                ]
+                summary_prefix = f"Slack [file shared] in #{channel}"
+            elif event_type == "reaction_added":
+                reaction = event.get("reaction", "")
+                item = event.get("item", {})
+                item_ts = item.get("ts", "")
+                item_channel = item.get("channel") or channel
+                user = event.get("user") or user
+                ts = event.get("event_ts") or ts
+                text = f":{reaction}: reaction added to message"
+                channel = item_channel
+                summary_prefix = f"Slack [reaction :{reaction}:] in #{channel}"
+            else:
+                text = event.get("text") or payload.get("text") or "No message text"
+                summary_prefix = f"Slack [{event_type}] in #{channel}"
+
+            # Construct clickable Slack permalink: https://slack.com/archives/{channel}/p{ts_without_dot}
+            source_url = None
+            if channel and ts:
+                clean_ts = str(ts).replace(".", "")
+                source_url = f"https://slack.com/archives/{channel}/p{clean_ts}"
+
+            summary = f"{summary_prefix}: {text[:80]}"
+            author_name = user
+            metadata = {
+                "event_type": event_type,
+                "subtype": subtype,
+                "channel_id": channel,
+                "text": text,
+                "body": text,
+                "ts": ts,
+                "thread_ts": event.get("thread_ts"),
+                "event_id": payload.get("event_id"),
+                "client_msg_id": event.get("client_msg_id"),
+                "team_id": payload.get("team_id"),
+                "previous_text": previous_text,
+                "files": files_meta,
+                "reaction": event.get("reaction") if event_type == "reaction_added" else None,
+                "item_ts": event.get("item", {}).get("ts") if event_type == "reaction_added" else None,
+                "item_user": event.get("item_user") if event_type == "reaction_added" else None
+            }
+
         elif platform == "jira":
             issue = payload.get("issue", {})
+            webhook_event = payload.get("webhookEvent", "jira:issue_updated")
+            comment = payload.get("comment", {})
+            attachment = payload.get("attachment", {})
+            worklog = payload.get("worklog", {})
+
             if issue:
                 key = issue.get("key", "JIRA-KEY")
                 fields = issue.get("fields", {})
                 title = fields.get("summary", "No Summary")
-                summary = f"Jira Issue {key}: {title}"
-                author_name = fields.get("creator", {}).get("displayName")
+                issue_type = fields.get("issuetype", {}).get("name", "Issue")
+                priority = fields.get("priority", {}).get("name", "Medium")
+                status_name = fields.get("status", {}).get("name", "Open")
+                project = fields.get("project", {})
+                project_key = project.get("key", "")
+                project_name = project.get("name", "")
+
+                creator = fields.get("creator", {}).get("displayName") or fields.get("reporter", {}).get("displayName") or "Jira User"
+                user = payload.get("user", {}).get("displayName") or creator
+                author_name = user
+
+                # Construct clickable Jira permalink: https://site.atlassian.net/browse/{key}
+                self_url = issue.get("self", "")
+                domain = ""
+                if "atlassian.net" in self_url:
+                    domain = self_url.split("/rest/api")[0]
+                if domain:
+                    source_url = f"{domain}/browse/{key}"
+                else:
+                    source_url = f"https://atlassian.net/browse/{key}"
+
+                # 1. Comment events author & summary resolution
+                if "comment" in webhook_event or comment:
+                    comment_author = comment.get("author", {}).get("displayName") or comment.get("updateAuthor", {}).get("displayName")
+                    if comment_author:
+                        author_name = comment_author
+
+                    comment_body = str(comment.get("body", ""))
+                    if webhook_event == "comment_updated":
+                        summary = f"Jira [{key}] [COMMENT EDITED] by {author_name}: {comment_body[:80]}"
+                    elif webhook_event == "comment_deleted":
+                        summary = f"Jira [{key}] [COMMENT DELETED] by {author_name}"
+                    else:
+                        summary = f"Jira [{key}] [NEW COMMENT] by {author_name}: {comment_body[:80]}"
+
+                # 2. Attachment events resolution
+                elif webhook_event == "attachment_created" or attachment:
+                    att_author = attachment.get("author", {}).get("displayName")
+                    if att_author:
+                        author_name = att_author
+                    att_name = attachment.get("filename", "file")
+                    att_size = attachment.get("size", 0)
+                    summary = f"Jira [{key}] [ATTACHMENT]: {att_name} ({att_size} bytes) attached by {author_name}"
+
+                # 3. Worklog events resolution
+                elif webhook_event == "worklog_created" or worklog:
+                    wl_author = worklog.get("author", {}).get("displayName") or worklog.get("updateAuthor", {}).get("displayName")
+                    if wl_author:
+                        author_name = wl_author
+                    time_spent = worklog.get("timeSpent", "time")
+                    summary = f"Jira [{key}] [WORKLOG]: {time_spent} logged by {author_name}"
+
+                # 4. Issue Lifecycle events (Created, Updated, Deleted)
+                elif webhook_event == "jira:issue_created":
+                    summary = f"Jira [{key}] [CREATED] ({issue_type}/{status_name}): {title}"
+                elif webhook_event == "jira:issue_deleted":
+                    summary = f"Jira [{key}] [DELETED]: {title}"
+                else:
+                    summary = f"Jira [{key}] [UPDATED] ({issue_type}/{status_name}): {title}"
+
+                metadata = {
+                    "event_type": webhook_event,
+                    "issue_key": key,
+                    "issue_title": title,
+                    "issue_type": issue_type,
+                    "priority": priority,
+                    "status": status_name,
+                    "project_key": project_key,
+                    "project_name": project_name,
+                    "body": title,
+                    "comment": comment.get("body") if comment else None,
+                    "attachment": {
+                        "filename": attachment.get("filename"),
+                        "size": attachment.get("size"),
+                        "mimeType": attachment.get("mimeType"),
+                        "content": attachment.get("content")
+                    } if attachment else None,
+                    "user": author_name
+                }
                 
         elif platform == "gmail":
             email = payload.get("email", {})
@@ -467,15 +890,18 @@ class IngestService:
         metadata = parsed.get("metadata") or {}
         full_text = f"{summary} {str(metadata)}".lower()
 
-        # GitHub Noise Filtering: Filter out Dependabot, chore/docs branches, and redundant push-to-PR-branch events
-        if parsed.get("type") == "github":
-            branch = str(metadata.get("branch") or "").lower()
-            event_type = metadata.get("event_type")
-            if "dependabot" in author or any(branch.startswith(prefix) for prefix in ["chore/", "docs/", "style/", "renovate/"]):
-                return False, f"Filtered out GitHub background noise ({author} on {branch})."
-            # Push events to non-default branches are redundant (the PR event already captures them)
-            if event_type == "push" and branch not in ["main", "master", "develop", "production"]:
-                return False, f"Filtered redundant push to PR branch ({branch})."
+        # Slack Noise Filtering: Filter administrative events (channel_join, channel_leave, channel_archive)
+        if parsed.get("type") == "slack":
+            subtype = metadata.get("subtype")
+            if subtype in {"channel_join", "channel_leave", "channel_archive", "channel_unarchive"}:
+                return False, f"Filtered Slack administrative event subtype: {subtype}"
+            
+            llm_class = metadata.get("llm_classification", {})
+            signal_type = llm_class.get("signal_type")
+            if signal_type == "noise":
+                reasoning = llm_class.get("reasoning", "social noise")
+                return False, f"Slack message classified as noise by signal intelligence ({reasoning})."
+            return True, None
 
         allowed_senders = [s.lower() for s in config.get("allowed_senders", []) if s and s.strip()]
         required_keywords = [k.lower() for k in config.get("required_keywords", []) if k and k.strip()]
@@ -573,6 +999,29 @@ class IngestService:
         metadata_str = str(parsed.get("metadata") or {}).lower()
         full_text = f"{summary} {metadata_str}"
         config = integration.config or {}
+
+        # Slack Incident Routing Rules:
+        # LLM signal_type (incident/debugging) with high/critical urgency spawns NEW SQL Investigations.
+        # Edits, deletes, topic changes, reactions, and thread replies land in standalone evidence or thread correlation.
+        if integration.platform == "slack":
+            metadata = parsed.get("metadata") or {}
+            subtype = metadata.get("subtype")
+            event_type = metadata.get("event_type")
+
+            if event_type == "reaction_added" or subtype in {"channel_topic", "channel_purpose", "message_changed", "message_deleted"}:
+                return False
+
+            if metadata.get("thread_ts"):
+                return False
+
+            llm_class = metadata.get("llm_classification", {})
+            signal_type = llm_class.get("signal_type", "discussion")
+            urgency = llm_class.get("urgency", "low")
+
+            if signal_type in ("incident", "debugging") and urgency in ("critical", "high"):
+                return True
+
+            return False
 
         # GitHub Conservative Routing Rules:
         # CI workflow failures, P0/bug-labeled issues, or PRs on incident branches with critical keywords spawn NEW Investigations.
@@ -699,10 +1148,21 @@ class IngestService:
         4. Correlation Engine
         5. Incident-Worthiness Evaluation & Storage Routing
         """
-        # Step 1: Platform Filter
         ist_now = get_ist_time_str()
         platform = integration.platform.upper()
 
+        # Step 0: Event Deduplication Check
+        event_id = raw_payload.get("event_id") or raw_payload.get("event", {}).get("client_msg_id")
+        if event_id:
+            if event_id in PROCESSED_EVENT_IDS:
+                print(f"[{ist_now}] 🔁 [{platform}] IGNORED (Duplicate Event ID: {event_id})")
+                return {"status": "ignored", "reason": f"Duplicate event ID '{event_id}' suppressed."}
+            
+            if len(PROCESSED_EVENT_IDS) > 10000:
+                PROCESSED_EVENT_IDS.clear()
+            PROCESSED_EVENT_IDS.add(str(event_id))
+
+        # Step 1: Platform Filter
         allowed, filter_reason = IngestService.platform_filter(integration, raw_payload)
         if not allowed:
             print(f"[{ist_now}] 🚫 [{platform}] IGNORED (Platform Filter): {filter_reason}")
@@ -710,6 +1170,53 @@ class IngestService:
 
         # Step 2: Normalize Payload
         parsed = IngestService.normalize_payload(integration.platform, raw_payload)
+
+        # Slack Real Name, Channel Name & LLM Signal Intelligence Resolution
+        if integration.platform == "slack":
+            from app.core.security import decrypt_credentials
+            try:
+                creds = decrypt_credentials(integration.credentials_encrypted)
+                access_token = creds.get("access_token")
+                
+                if parsed.get("author_name"):
+                    parsed["author_name"] = await resolve_slack_user_name(access_token, parsed["author_name"])
+                
+                channel_id = parsed.get("metadata", {}).get("channel_id")
+                ch_name = channel_id or "general"
+                if channel_id:
+                    ch_name = await resolve_slack_channel_name(access_token, channel_id, integration.config)
+                    parsed["metadata"]["channel_name"] = ch_name
+                    if f"in #{channel_id}" in parsed.get("summary", ""):
+                        parsed["summary"] = parsed["summary"].replace(f"in #{channel_id}", f"in #{ch_name}")
+
+                # Call LLM Signal Intelligence
+                text_to_classify = parsed.get("metadata", {}).get("text", "")
+                llm_class = await classify_slack_signal(text_to_classify, ch_name)
+                parsed["metadata"]["llm_classification"] = llm_class
+            except Exception:
+                pass
+
+        # Step 2.5: Slack Evidence Lifecycle (Edits, Deletions)
+        if integration.platform == "slack":
+            subtype = parsed.get("metadata", {}).get("subtype")
+            channel_id = parsed.get("metadata", {}).get("channel_id")
+            
+            if subtype == "message_changed":
+                orig_ts = parsed.get("metadata", {}).get("ts")
+                new_text = parsed.get("metadata", {}).get("text", "")
+                prev_text = parsed.get("metadata", {}).get("previous_text")
+                edited_id = await handle_slack_edit(mongo_db, channel_id, orig_ts, new_text, prev_text)
+                if edited_id:
+                    print(f"[{ist_now}] ✏️ [SLACK] EVIDENCE UPDATED (Edit Event: {edited_id})")
+                    return {"status": "updated", "evidence_id": edited_id}
+
+            elif subtype == "message_deleted":
+                del_ts = parsed.get("metadata", {}).get("ts")
+                retracted_id = await handle_slack_delete(mongo_db, channel_id, del_ts)
+                if retracted_id:
+                    print(f"[{ist_now}] 🗑️ [SLACK] EVIDENCE RETRACTED (Delete Event: {retracted_id})")
+                    return {"status": "retracted", "evidence_id": retracted_id}
+
         author = parsed.get("author_name") or "Unknown"
         summary = parsed.get("summary") or "No Summary"
         print(f"[{ist_now}] 📥 INCOMING TELEMETRY | Platform: {platform} | Author: {author[:30]} | Summary: {summary[:80]}")
@@ -719,6 +1226,27 @@ class IngestService:
         if not is_signal:
             print(f"[{ist_now}] 🔇 [{platform}] IGNORED (Noise Filter): {noise_reason}")
             return {"status": "ignored", "reason": noise_reason}
+
+        # Step 3.5: Slack Deterministic Thread Correlation
+        if integration.platform == "slack":
+            thread_ts = parsed.get("metadata", {}).get("thread_ts")
+            channel_id = parsed.get("metadata", {}).get("channel_id")
+            thread_inv_id = await correlate_slack_thread(mongo_db, thread_ts, channel_id)
+            if thread_inv_id:
+                evidence_in = EvidenceCreate(
+                    type=parsed["type"],
+                    summary=parsed["summary"],
+                    author_name=parsed["author_name"],
+                    source_url=parsed["source_url"],
+                    metadata=parsed["metadata"]
+                )
+                evidence = await EvidenceService.create_evidence(mongo_db, uuid.UUID(thread_inv_id), evidence_in)
+                print(f"[{ist_now}] 🧵 [SLACK] THREAD CORRELATED -> Linked to Investigation {thread_inv_id}")
+                return {
+                    "status": "correlated",
+                    "investigation_id": uuid.UUID(thread_inv_id),
+                    "evidence_id": evidence.id
+                }
 
         # Step 4: Correlation Engine (Phase 1 Advanced Weighted Scoring)
         incoming_text = f"{parsed['summary']} {str(parsed.get('metadata') or {})}"

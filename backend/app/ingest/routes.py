@@ -7,6 +7,85 @@ from app.ingest.services import IngestService
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
+@router.post("/slack", status_code=status.HTTP_200_OK)
+async def receive_global_slack_webhook(
+    db: DBSessionDep,
+    mongo_db: MongoSessionDep,
+    payload: dict[str, Any]
+) -> Any:
+    """
+    Static multi-tenant Slack Event Subscription webhook receiver.
+    Resolves tenant workspace dynamically using payload['team_id'].
+    """
+    # 1. Slack URL Verification Challenge handler
+    if payload.get("type") == "url_verification":
+        return {"challenge": payload.get("challenge")}
+
+    team_id = payload.get("team_id") or payload.get("event", {}).get("team")
+
+    # 2. Locate active Slack integration in DB by team_id
+    from sqlalchemy import select
+    from app.integrations.models import Integration
+
+    statement = select(Integration).where(
+        Integration.platform == "slack",
+        Integration.status == "active"
+    )
+    res = await db.execute(statement)
+    active_slack_integrations = res.scalars().all()
+
+    integration = None
+    if team_id:
+        for i in active_slack_integrations:
+            cfg = i.config or {}
+            if cfg.get("team_id") == team_id:
+                integration = i
+                break
+
+    # Fallback to first active Slack integration if team_id not matched
+    if not integration and active_slack_integrations:
+        integration = active_slack_integrations[0]
+
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active Slack integration found for workspace team_id '{team_id}'"
+        )
+
+    # 3. Process signal through IngestService
+    return await IngestService.correlate_and_process(db, mongo_db, integration, payload)
+
+
+@router.post("/jira", status_code=status.HTTP_200_OK)
+async def receive_global_jira_webhook(
+    db: DBSessionDep,
+    mongo_db: MongoSessionDep,
+    payload: dict[str, Any]
+) -> Any:
+    """
+    Static multi-tenant Jira Webhook receiver.
+    Resolves active Jira integration dynamically.
+    """
+    from sqlalchemy import select
+    from app.integrations.models import Integration
+
+    statement = select(Integration).where(
+        Integration.platform == "jira",
+        Integration.status == "active"
+    )
+    res = await db.execute(statement)
+    active_jira_integrations = res.scalars().all()
+
+    if not active_jira_integrations:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active Jira integration found"
+        )
+
+    integration = active_jira_integrations[0]
+    return await IngestService.correlate_and_process(db, mongo_db, integration, payload)
+
+
 @router.post("/{integration_id}", status_code=status.HTTP_200_OK)
 async def receive_webhook_payload(
     db: DBSessionDep,

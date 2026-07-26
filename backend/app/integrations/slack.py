@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse, HTMLResponse
 import httpx
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.security import decode_token, encrypt_credentials
@@ -16,8 +16,9 @@ router = APIRouter(prefix="/slack", tags=["integrations"])
 
 
 class SlackConfigPayload(BaseModel):
-    channel_id: str
-    channel_name: str
+    channel_id: str | None = None
+    channel_name: str | None = None
+    tracked_channels: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @router.get("/authorize")
@@ -36,11 +37,11 @@ async def slack_authorize(token: str):
         raise HTTPException(status_code=401, detail="Session expired or invalid")
 
     # Construct the Slack redirect authorization URL
-    # Bot scopes needed: channels:read (list channels) and chat:write (post reports)
+    # Bot scopes: channels:read, groups:read, chat:write, app_mentions:read, users:read, reactions:read
     slack_url = (
         f"https://slack.com/oauth/v2/authorize"
         f"?client_id={settings.SLACK_CLIENT_ID}"
-        f"&scope=channels:read,chat:write"
+        f"&scope=channels:read,groups:read,chat:write,app_mentions:read,users:read,reactions:read"
         f"&redirect_uri={settings.SLACK_REDIRECT_URI}"
         f"&state={token}"
     )
@@ -103,6 +104,10 @@ async def slack_callback(db: DBSessionDep, code: str, state: str):
     if not access_token:
         raise HTTPException(status_code=400, detail="Missing access token in Slack response")
 
+    team_info = token_data.get("team") or {}
+    team_id = team_info.get("id")
+    team_name = team_info.get("name")
+
     # Encrypt credentials securely before committing
     encrypted_creds = encrypt_credentials({"access_token": access_token})
 
@@ -118,12 +123,23 @@ async def slack_callback(db: DBSessionDep, code: str, state: str):
         integration.credentials_encrypted = encrypted_creds
         integration.status = "active"
         integration.last_synced_at = datetime.utcnow()
+        new_config = dict(integration.config or {})
+        if team_id:
+            new_config["team_id"] = team_id
+        if team_name:
+            new_config["team_name"] = team_name
+        integration.config = new_config
     else:
+        new_config = {}
+        if team_id:
+            new_config["team_id"] = team_id
+        if team_name:
+            new_config["team_name"] = team_name
         integration = Integration(
             organization_id=organization_id,
             platform="slack",
             credentials_encrypted=encrypted_creds,
-            config={},
+            config=new_config,
             status="active"
         )
     db.add(integration)
@@ -179,18 +195,25 @@ async def get_slack_channels(
 
     # 3. Query Slack conversations.list API
     async with httpx.AsyncClient(timeout=15.0) as client:
+        # First attempt: both public and private channels
         response = await client.get(
             "https://slack.com/api/conversations.list?types=public_channel,private_channel&exclude_archived=true&limit=100",
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "User-Agent": "Sigint-AI-Platform"
-            }
+            headers={"Authorization": f"Bearer {access_token}", "User-Agent": "Sigint-AI-Platform"}
         )
+
+        slack_data = response.json()
+        
+        # Fallback: If missing_scope (e.g. groups:read missing), fallback to public_channel only
+        if not slack_data.get("ok") and slack_data.get("error") == "missing_scope":
+            response = await client.get(
+                "https://slack.com/api/conversations.list?types=public_channel&exclude_archived=true&limit=100",
+                headers={"Authorization": f"Bearer {access_token}", "User-Agent": "Sigint-AI-Platform"}
+            )
+            slack_data = response.json()
 
     if response.status_code != 200:
         raise HTTPException(status_code=400, detail="Failed to fetch channels from Slack API")
 
-    slack_data = response.json()
     if not slack_data.get("ok"):
         raise HTTPException(status_code=400, detail=f"Slack API error: {slack_data.get('error')}")
 
@@ -213,7 +236,7 @@ async def update_slack_config(
     db: DBSessionDep
 ):
     """
-    Saves the selected Slack channel target to the integration's JSONB config column.
+    Saves the selected Slack channels list to the integration's JSONB config column.
     """
     # 1. Fetch integration
     statement = select(Integration).where(Integration.id == integration_id)
@@ -225,8 +248,15 @@ async def update_slack_config(
 
     # 2. Update config JSONB column directly
     new_config = dict(integration.config or {})
-    new_config["channel_id"] = payload.channel_id
-    new_config["channel_name"] = payload.channel_name
+    
+    if payload.tracked_channels:
+        new_config["tracked_channels"] = payload.tracked_channels
+        new_config["channel_id"] = payload.tracked_channels[0].get("id") if payload.tracked_channels else ""
+        new_config["channel_name"] = payload.tracked_channels[0].get("name") if payload.tracked_channels else ""
+    elif payload.channel_id:
+        new_config["channel_id"] = payload.channel_id
+        new_config["channel_name"] = payload.channel_name
+        new_config["tracked_channels"] = [{"id": payload.channel_id, "name": payload.channel_name}]
 
     # 3. Save and commit changes
     integration.config = new_config
