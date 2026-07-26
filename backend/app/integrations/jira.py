@@ -253,6 +253,63 @@ async def jira_callback(db: DBSessionDep, code: str, state: str):
     return HTMLResponse(content=html_content)
 
 
+async def get_valid_jira_access_token(
+    db: DBSessionDep,
+    integration: Integration
+) -> tuple[str | None, str | None]:
+    """
+    Returns valid (access_token, cloud_id) for Jira integration.
+    If access_token is expired (401), automatically uses refresh_token
+    to acquire a fresh access_token via POST https://auth.atlassian.com/oauth/token and updates DB!
+    """
+    creds = decrypt_credentials(integration.credentials_encrypted)
+    access_token = creds.get("access_token")
+    refresh_token = creds.get("refresh_token")
+    cloud_id = creds.get("cloud_id")
+
+    if not access_token or not cloud_id:
+        return None, None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/project",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            if resp.status_code == 200:
+                return access_token, cloud_id
+
+            if resp.status_code == 401 and refresh_token:
+                logger.info("Jira access_token expired. Refreshing token with Atlassian...")
+                token_resp = await client.post(
+                    "https://auth.atlassian.com/oauth/token",
+                    json={
+                        "grant_type": "refresh_token",
+                        "client_id": settings.JIRA_CLIENT_ID,
+                        "client_secret": settings.JIRA_CLIENT_SECRET,
+                        "refresh_token": refresh_token,
+                    }
+                )
+                if token_resp.status_code == 200:
+                    t_data = token_resp.json()
+                    new_access_token = t_data.get("access_token")
+                    new_refresh_token = t_data.get("refresh_token") or refresh_token
+
+                    creds["access_token"] = new_access_token
+                    creds["refresh_token"] = new_refresh_token
+                    integration.credentials_encrypted = encrypt_credentials(creds)
+                    integration.updated_at = datetime.utcnow()
+                    db.add(integration)
+                    await db.commit()
+                    await db.refresh(integration)
+                    logger.info("Successfully refreshed Atlassian access token!")
+                    return new_access_token, cloud_id
+    except Exception as e:
+        logger.error(f"Error checking/refreshing Jira access token: {e}")
+
+    return access_token, cloud_id
+
+
 @router.get("/{integration_id}/projects")
 @router.get("/projects")
 async def get_jira_projects(
@@ -294,9 +351,7 @@ async def get_jira_projects(
     if not integration:
         return {"projects": []}
 
-    creds = decrypt_credentials(integration.credentials_encrypted)
-    access_token = creds.get("access_token")
-    cloud_id = creds.get("cloud_id")
+    access_token, cloud_id = await get_valid_jira_access_token(db, integration)
 
     if not access_token or not cloud_id:
         return {"projects": []}
