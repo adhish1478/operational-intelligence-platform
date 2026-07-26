@@ -1,5 +1,5 @@
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
-export type InvestigationStatus = 'open' | 'investigating' | 'resolved';
+export type InvestigationStatus = 'open' | 'investigating' | 'resolved' | 'closed';
 export type InvestigationCategory = 'launch_delay' | 'customer_escalation' | 'revenue_risk' | 'team_blocker' | 'security';
 export type SourceSystem = 'slack' | 'jira' | 'gmail' | 'github' | 'notion';
 
