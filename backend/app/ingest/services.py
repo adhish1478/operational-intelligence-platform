@@ -299,6 +299,42 @@ async def correlate_jira_issue_key(
     return None
 
 
+def extract_jira_keys_from_text(text: str | None) -> set[str]:
+    """
+    Scans arbitrary text for Jira issue key patterns (e.g. KAN-100, PROD-42, SEC-9).
+    Filters out common uppercase non-issue tokens.
+    """
+    if not text:
+        return set()
+
+    matches = re.findall(r'\b([A-Z][A-Z0-9]+-\d+)\b', text)
+    ignore_prefixes = {"HTTP", "ISO", "UTF", "TLS", "SSL", "SHA", "MD"}
+    valid_keys = set()
+    for m in matches:
+        prefix = m.split('-')[0]
+        if prefix not in ignore_prefixes:
+            valid_keys.add(m)
+    return valid_keys
+
+
+async def correlate_cross_platform_keys(
+    mongo_db: AsyncIOMotorDatabase,
+    text: str | None
+) -> str | None:
+    """
+    Cross-platform deterministic correlation via Jira issue keys referenced in text.
+    Works for Slack messages, GitHub PR titles/branches, Gmail subjects, alert text.
+    If any referenced issue key (e.g. KAN-3) matches an active evidence item linked
+    to an investigation container in MongoDB, returns that investigation_id.
+    """
+    keys = extract_jira_keys_from_text(text)
+    for key in keys:
+        inv_id = await correlate_jira_issue_key(mongo_db, key)
+        if inv_id:
+            return inv_id
+    return None
+
+
 async def handle_jira_comment_edit(
     mongo_db: AsyncIOMotorDatabase,
     issue_key: str | None,
@@ -1427,6 +1463,26 @@ class IngestService:
                 return {
                     "status": "correlated",
                     "investigation_id": uuid.UUID(jira_inv_id),
+                    "evidence_id": evidence.id
+                }
+
+        # Step 3.75: Cross-Platform Issue-Key Correlation (Slack, GitHub, Gmail referencing Jira keys like KAN-100)
+        if integration.platform != "jira":
+            full_incoming_text = f"{parsed.get('summary', '')} {str(parsed.get('metadata') or {})}"
+            cross_inv_id = await correlate_cross_platform_keys(mongo_db, full_incoming_text)
+            if cross_inv_id:
+                evidence_in = EvidenceCreate(
+                    type=parsed["type"],
+                    summary=parsed["summary"],
+                    author_name=parsed["author_name"],
+                    source_url=parsed["source_url"],
+                    metadata=parsed["metadata"]
+                )
+                evidence = await EvidenceService.create_evidence(mongo_db, uuid.UUID(cross_inv_id), evidence_in)
+                print(f"[{ist_now}] 🌐 [{platform}] CROSS-PLATFORM CORRELATED -> Linked to Investigation {cross_inv_id} via Jira issue key match")
+                return {
+                    "status": "correlated",
+                    "investigation_id": uuid.UUID(cross_inv_id),
                     "evidence_id": evidence.id
                 }
 
