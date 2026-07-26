@@ -250,10 +250,10 @@ Handles mutable evidence for platforms that support message edits and deletions:
   * `message_changed` → `handle_slack_edit()`: Updates existing MongoDB evidence record in-place. Sets `metadata.edited = True`, `metadata.previous_text`, appends `[edited]` to summary.
   * `message_deleted` → `handle_slack_delete()`: Marks existing MongoDB evidence record as retracted. Sets `metadata.retracted = True`, appends `[RETRACTED]` to summary.
 
-**Jira** (Planned — Phase 2):
-  * `comment_updated` → Will update existing comment evidence in MongoDB.
-  * `comment_deleted` → Will mark existing comment evidence as retracted.
-  * `jira:issue_deleted` → Will mark all linked evidence for that issue key as retracted.
+**Jira** (Implemented & Operational):
+  * `comment_updated` → `handle_jira_comment_edit()`: Updates existing comment evidence in MongoDB. Sets `metadata.comment`, `metadata.edited = True`, appends `[edited]` to summary.
+  * `comment_deleted` → `handle_jira_comment_delete()`: Marks existing comment evidence as retracted in MongoDB (`metadata.retracted = True`, appends `[RETRACTED]`).
+  * `jira:issue_deleted` → `handle_jira_issue_delete()`: Marks ALL evidence items matching the issue key as retracted in MongoDB.
 
 #### **Step 3: Signal / Noise Classifier (`classify_signal`)**
 
@@ -280,9 +280,14 @@ Handles mutable evidence for platforms that support message edits and deletions:
 * Returns the parent message's `investigation_id` for O(1) deterministic correlation.
 * Thread replies never spawn new investigations.
 
-**Jira Issue-Key Correlation** (Planned — Phase 2):
-* Events referencing an existing issue key (e.g. `KAN-3`) will correlate deterministically to any existing investigation that already has evidence from the same issue key.
-* Comments, attachments, and worklogs on an issue auto-link to the issue's existing investigation.
+**Jira Issue-Key Correlation** (`correlate_jira_issue_key` — Implemented & Operational):
+* If a Jira event references an issue key (e.g. `KAN-3`), performs O(1) lookup in MongoDB for active non-retracted evidence with that issue key linked to an investigation.
+* Comments, attachments, worklogs, and status transitions on `KAN-3` all auto-link to the issue's existing investigation container without hitting the fuzzy hybrid engine.
+
+#### **Step 3.75: Cross-Platform Issue-Key Correlation** (`correlate_cross_platform_keys` — Implemented & Operational)
+* Scans incoming non-Jira events (Slack messages, GitHub PR titles/branches, Gmail alerts) for Jira issue keys (`KAN-100`, `PROD-42`, `SEC-9`) via `extract_jira_keys_from_text()`.
+* If a referenced issue key matches an active investigation container in MongoDB, auto-links the incoming Slack/GitHub/Gmail event to that investigation deterministically!
+* Eliminates multi-investigation fragmentation across platforms.
 
 #### **Step 4: Multi-Phase Correlation Engine (`correlate_signal`)**
 Evaluates the incoming signal against active open investigations for the tenant (`status IN ('open', 'investigating')`) using our **Phase 2 Hybrid Scoring Model**:
@@ -307,9 +312,9 @@ If Stage 4 returns no correlation match:
 * **Operational System Monitoring Emails**: Emails from monitoring providers (`Datadog`, `Sentry`, `Grafana`, `Kubernetes`, `PagerDuty`, `CloudWatch`, `Prometheus`, `NewRelic`) or containing operational alert prefixes (`[ALERT]`, `[ERROR]`, `[CRITICAL]`, `incident`).
 * **Personal Email Filtering**: Personal bank transaction alerts (`ICICI`, `CRED`, `SBI`), newsletters (`The Economist`, `Medium`, `Anaconda`, `NVIDIA`), trading digests (`Groww`, `NSE`), and job alerts (`LinkedIn`, `Indeed`, `hirist`) are filtered out and saved directly as **Standalone Evidence** (`investigation_id = null`).
 
-**Jira Incident Routing** (Current — uses generic fallback):
-* `True` if user rule matched, incident keywords present in text, or metadata priority is `critical`/`high`/`p0`/`p1`/`blocker`.
-* All other events stored as standalone evidence.
+**Jira Incident Routing** (Implemented & Operational):
+* `True` ONLY if metadata `priority` in (`highest`, `high`, `critical`, `p0`, `p1`, `blocker`) OR `issue_type` in (`bug`, `incident`, `security`, `vulnerability`).
+* Comments, worklogs, attachments, deletions, or lower priority tasks (`Story`, `Task`) → `False` (stored as standalone evidence or correlated via Step 3.5/3.75).
 
 ---
 
@@ -534,53 +539,25 @@ The frontend follows a **Linear / Palantir-inspired high-density operational lig
 
 ---
 
-## 🚀 10. Jira Correlation Engine Roadmap
+## 🚀 10. Jira Correlation Engine Roadmap (Status: ✅ COMPLETED & DEPLOYED)
 
-The Jira correlation engine will be implemented in **3 phases**, mirroring the maturity model established by the Slack correlation engine:
+The Jira correlation engine has been fully implemented across all **3 planned phases**, achieving complete feature parity with the Slack correlation engine:
 
-### Phase 1: Issue-Key Deterministic Correlation (Priority: HIGH)
+### Phase 1: Issue-Key Deterministic Correlation (✅ COMPLETED)
+* **Function**: `correlate_jira_issue_key()` inserted at Step 3.5.
+* Performs O(1) MongoDB lookup for active evidence matching `metadata.issue_key`.
+* Comments, attachments, worklogs, status changes, and deletions on `KAN-3` automatically link to the ticket's existing investigation container without hitting the hybrid scoring engine.
 
-**Goal**: Any Jira event referencing an existing issue key (`KAN-3`) should automatically link to the investigation that already tracks that issue — without hitting the hybrid scoring engine.
+### Phase 2: Evidence Lifecycle (✅ COMPLETED)
+* **Functions**: `handle_jira_comment_edit()`, `handle_jira_comment_delete()`, `handle_jira_issue_delete()`.
+* Comment edits mutate existing MongoDB evidence in-place (`metadata.edited = True`).
+* Comment deletions mark existing comment evidence as `[RETRACTED]`.
+* Issue deletions mark ALL evidence records matching the issue key as `[RETRACTED]`.
 
-```
- [Incoming Jira Webhook: comment on KAN-3]
-        │
-        ▼
- ┌─────────────────────────────┐
- │ correlate_jira_issue_key()  │  Query MongoDB: {"type": "jira", "metadata.issue_key": "KAN-3"}
- │ O(1) Deterministic Lookup   │  Return parent investigation_id if found
- └──────────┬──────────────────┘
-            │ (Found) → CORRELATED
-            │ (Not Found) → Fall through to Step 4
-```
-
-**Implementation**:
-* New function `correlate_jira_issue_key(mongo_db, issue_key)` — analogous to `correlate_slack_thread()`.
-* Inserted at Step 3.5 in the pipeline for Jira events.
-* Comments, attachments, worklogs, status changes, and deletions on `KAN-3` all auto-link to the same investigation.
-
-### Phase 2: Evidence Lifecycle (Edits, Deletions, Retractions)
-
-**Goal**: Jira comment edits and deletions should mutate existing MongoDB evidence records in-place, not create duplicate entries.
-
-**Implementation**:
-* `handle_jira_comment_edit(mongo_db, issue_key, comment_id, new_body)` — analogous to `handle_slack_edit()`.
-* `handle_jira_comment_delete(mongo_db, issue_key, comment_id)` — analogous to `handle_slack_delete()`.
-* `handle_jira_issue_delete(mongo_db, issue_key)` — marks ALL evidence for the issue key as `[RETRACTED]`.
-* Inserted at Step 2.5 in the pipeline for Jira `comment_updated`, `comment_deleted`, `jira:issue_deleted` events.
-
-### Phase 3: Intelligent Incident Routing
-
-**Goal**: Replace the generic keyword-based `is_incident_worthy` fallback for Jira with structured metadata analysis.
-
-**Implementation**:
-* Route based on Jira's native structured fields rather than raw keyword scanning:
-  - **Priority-based**: `Highest`/`High` priority → incident-worthy.
-  - **Issue type-based**: `Bug`, `Incident`, `Security` → incident-worthy.
-  - **Label-based**: Labels containing `p0`, `p1`, `outage`, `incident`, `critical` → incident-worthy.
-  - **Status transition-based**: Transitions from `Open` → `Critical`/`Blocked` → incident-worthy.
-* `Task`, `Story`, `Epic` with `Medium`/`Low` priority → standalone evidence.
-* Removes reliance on keyword scanning of summary text (which produces false positives).
+### Phase 3: Intelligent Incident Routing (✅ COMPLETED)
+* Replaced generic keyword scanning for Jira with structured metadata routing in `is_incident_worthy`.
+* High/Highest priority issues or `Bug`/`Incident` issue types spawn NEW SQL investigation containers.
+* Secondary activities (`Task`, `Story`, comments, worklogs, attachments) land in standalone evidence or deterministic correlation.
 
 ---
 
@@ -596,7 +573,8 @@ The Jira correlation engine will be implemented in **3 phases**, mirroring the m
 
 ## 🔮 12. Phase 3 Roadmap: Enterprise Scale
 
+* **Real-Time SSE / WebSocket Push**: Telemetry push architecture detailed in [`FUTURE_PLANS.md`](file:///Users/adhisharavind/Desktop/Service-Assistant/FUTURE_PLANS.md).
 * **Asynchronous LLM Signal Clustering**: Background worker tasks utilizing LLMs to summarize multi-evidence investigation timelines into automated root-cause diagnoses.
 * **Human Triage Feedback Loop**: Learning correlation weights dynamically based on operator actions (e.g. manually moving or splitting evidence items across investigations).
-* **Cross-Platform Correlation Intelligence**: A Jira bug referencing `auth-gateway` correlating with a Slack incident thread discussing the same service, and a GitHub CI failure on the `fix/auth-gateway` branch — all auto-linked to one investigation.
+* **Cross-Platform Correlation Intelligence**: ✅ Implemented via Step 3.75 (`correlate_cross_platform_keys`).
 * **Dynamic Jira Project List in UI**: Replace manual text input for tracked projects with dynamic project list fetched from Jira REST API (matching GitHub/Slack UI pattern).
