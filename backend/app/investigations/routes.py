@@ -231,44 +231,63 @@ async def escalate_investigation_to_jira(
         raise HTTPException(status_code=400, detail="Missing Jira connection credentials. Please reconnect Jira integration.")
 
     project_list = integration.config.get("tracked_projects", [])
-    project_key = "PROD"
+    project_key = None
     if project_list:
         p0 = project_list[0]
         project_key = p0.get("key") if isinstance(p0, dict) else str(p0)
 
     # 5. POST to Jira issue creation endpoint
+    # 5. POST to Jira issue creation endpoint
     import httpx
-    jira_payload = {
-        "fields": {
-            "project": {
-                "key": project_key
-            },
-            "summary": f"[OIP Alert] {investigation.title}",
-            "description": {
-                "type": "doc",
-                "version": 1,
-                "content": [
-                    {
-                        "type": "paragraph",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": (
-                                    f"Operational incident escalated from OIP.\n\n"
-                                    f"AI Diagnosis Report:\n{latest_diagnosis.report_summary}"
-                                )
-                            }
-                        ]
-                    }
-                ]
-            },
-            "issuetype": {
-                "name": "Task"
-            }
-        }
-    }
 
     async with httpx.AsyncClient(timeout=15.0) as client:
+        # Dynamically resolve target project key from Jira API if not specified
+        if not project_key and is_oauth:
+            try:
+                pj_resp = await client.get(
+                    f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/project/search",
+                    headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+                )
+                if pj_resp.status_code == 200:
+                    values = pj_resp.json().get("values", [])
+                    if values:
+                        project_key = values[0].get("key")
+            except Exception:
+                pass
+
+        if not project_key:
+            project_key = "KAN"
+
+        jira_payload = {
+            "fields": {
+                "project": {
+                    "key": project_key
+                },
+                "summary": f"[OIP Alert] {investigation.title}",
+                "description": {
+                    "type": "doc",
+                    "version": 1,
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        f"Operational incident escalated from OIP.\n\n"
+                                        f"AI Diagnosis Report:\n{latest_diagnosis.report_summary}"
+                                    )
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "issuetype": {
+                    "name": "Task"
+                }
+            }
+        }
+
         try:
             if is_oauth:
                 req_url = f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/issue"
@@ -278,6 +297,33 @@ async def escalate_investigation_to_jira(
                     "Accept": "application/json"
                 }
                 response = await client.post(req_url, headers=headers, json=jira_payload)
+                
+                # Automatic 401 token refresh & retry
+                if response.status_code == 401 and creds.get("refresh_token"):
+                    from app.core.config import settings
+                    from app.core.security import encrypt_credentials
+                    
+                    rf_resp = await client.post(
+                        "https://auth.atlassian.com/oauth/token",
+                        json={
+                            "grant_type": "refresh_token",
+                            "client_id": settings.JIRA_CLIENT_ID,
+                            "client_secret": settings.JIRA_CLIENT_SECRET,
+                            "refresh_token": creds["refresh_token"],
+                        }
+                    )
+                    if rf_resp.status_code == 200:
+                        rf_data = rf_resp.json()
+                        new_access_token = rf_data.get("access_token")
+                        new_refresh_token = rf_data.get("refresh_token") or creds["refresh_token"]
+                        creds["access_token"] = new_access_token
+                        creds["refresh_token"] = new_refresh_token
+                        integration.credentials_encrypted = encrypt_credentials(creds)
+                        db.add(integration)
+                        await db.commit()
+
+                        headers["Authorization"] = f"Bearer {new_access_token}"
+                        response = await client.post(req_url, headers=headers, json=jira_payload)
             else:
                 req_url = f"{host_url}/rest/api/3/issue"
                 headers = {"Content-Type": "application/json", "Accept": "application/json"}
