@@ -6,6 +6,9 @@ from typing import Any
 import aio_pika
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.auth.models
+import app.organizations.models
+import app.investigations.models
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.db.mongo import get_mongo_db

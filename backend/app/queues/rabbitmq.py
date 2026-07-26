@@ -150,7 +150,7 @@ class RabbitMQManager:
             body,
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
-            expiration=str(backoff_ms),
+            expiration=int(backoff_ms) / 1000.0,
             headers={
                 "x-retry-count": retry_count,
                 "x-backoff-ms": backoff_ms,
