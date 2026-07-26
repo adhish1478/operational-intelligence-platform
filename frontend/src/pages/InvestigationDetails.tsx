@@ -19,6 +19,7 @@ import { mapInvestigation, mapEvidence } from '../lib/mappers';
 import type { Severity, Evidence, EntityReference } from '../types';
 import { EvidenceDetailModal } from '../components/EvidenceDetailModal';
 import { AiDiagnosisModal } from '../components/AiDiagnosisModal';
+import { MarkdownRenderer } from '../components/MarkdownRenderer';
 
 export const InvestigationDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -266,7 +267,11 @@ export const InvestigationDetails: React.FC = () => {
                 <h4 className="text-body-sm font-semibold text-error flex items-center gap-1.5 mb-1">
                   <span>Suggested Remediation</span>
                 </h4>
-                <p className="text-body-sm text-on-surface whitespace-pre-line">{investigation.suggestedAction || 'No remediation suggested yet. Run AI Diagnostics above.'}</p>
+                {investigation.suggestedAction ? (
+                  <MarkdownRenderer content={investigation.suggestedAction} />
+                ) : (
+                  <p className="text-body-sm text-on-surface">No remediation suggested yet. Run AI Diagnostics above.</p>
+                )}
               </div>
 
               {investigation.suggestedAction && (

@@ -11,6 +11,7 @@ import {
   Layers
 } from 'lucide-react';
 import type { Evidence } from '../types';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface AiDiagnosisModalProps {
   isOpen: boolean;
@@ -149,9 +150,7 @@ export const AiDiagnosisModal: React.FC<AiDiagnosisModalProps> = ({
               </div>
 
               {/* Formatted Report Payload */}
-              <div className="prose prose-sm max-w-none text-slate-800 text-sm leading-relaxed whitespace-pre-wrap font-sans bg-slate-50/50 p-4 rounded-lg border border-slate-200/80">
-                {suggestedAction}
-              </div>
+              <MarkdownRenderer content={suggestedAction} className="bg-slate-50/50 p-5 rounded-lg border border-slate-200/80" />
             </div>
           ) : (
             <div className="py-12 flex flex-col items-center justify-center text-center space-y-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
