@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     MONGODB_DB: str = "oip_mongo"
     MONGODB_TEST_DB: str = "oip_mongo_test"
 
+    # RabbitMQ Message Queue Settings
+    RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
+    QUEUE_MAX_RETRIES: int = 5
+    QUEUE_INITIAL_BACKOFF_MS: int = 2000
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = 5
+    CIRCUIT_BREAKER_RESET_TIMEOUT: float = 30.0
+
 
     @computed_field
     @property
