@@ -25,12 +25,13 @@ Our platform introduces a **5-Stage Ingestion Pipeline** powered by a **Multi-Ph
 | **Backend Framework** | **FastAPI (Python 3.11)** | High-performance asynchronous API & background worker processing |
 | **Relational DB** | **PostgreSQL (SQLAlchemy 2.0 Async)** | Stores tenant organizations, user accounts, integration configs, and **`Investigations`** |
 | **Document DB** | **MongoDB (Motor / PyMongo Async)** | Stores unstructured **`Evidence`** telemetry documents |
+| **Message Broker** | **RabbitMQ (aio-pika 10.0+)** | Asynchronous event-driven queue pipeline, exponential backoff retries, DLQ, & Circuit Breaker |
 | **Frontend Framework** | **React 18 + TypeScript + Vite** | Single Page Application (SPA) with strong type safety |
 | **State & Query** | **TanStack Query v5 + Zustand** | In-memory server cache management, optimistic updates, and global auth state |
-| **Styling & UI** | **Tailwind CSS + Lucide Icons** | Linear / Palantir-inspired high-density operational light design system |
-| **Security & Crypto** | **Fernet (Cryptography) + PyJWT** | AES-128-CBC credential encryption & JWT access/refresh token rotation |
+| **Styling & UI** | **Tailwind CSS + Lucide Icons + React-Markdown** | Linear / Palantir-inspired high-density operational design system with rich Markdown rendering |
+| **Security & Crypto** | **Fernet (Cryptography) + PyJWT** | AES-128-CBC credential encryption, JWT token rotation, & OAuth 2.0 3LO token auto-refresh |
 | **AI / Embeddings** | **OpenAI API (`text-embedding-3-small`)** | 1536-dimensional semantic vector embeddings for cross-platform signal correlation |
-| **AI / Classification** | **OpenAI API (`gpt-4o-mini`)** | LLM-powered signal intelligence classifier for unstructured Slack messages (~$0.000018/call, ~300ms latency) |
+| **AI / Classification** | **OpenAI API (`gpt-4o-mini` & `gpt-4o`)** | LLM signal classifier for Slack/telemetry & automated Root Cause Analysis (RCA) diagnoses |
 
 ---
 
@@ -133,12 +134,19 @@ OAuth flow: `GET /api/v1/integrations/gmail/authorize` → Google OAuth → `GET
 
 ## ⚙️ 5. The 5-Stage Ingestion Pipeline Architecture
 
-Every incoming signal (polled via background worker every 60s or received via webhooks) flows through **5 sequential pipeline stages**:
+Every incoming signal (polled via background worker every 60s or received via webhooks) flows through **RabbitMQ Asynchronous Dispatch (Step -1)** followed by **5 sequential pipeline stages**:
 
 ```
- [Raw Event Payload]
+ [Raw Webhook Event]
         │
         ▼
+ ┌────────────────┐
+ │    Step -1     │ ──► Publishes to RabbitMQ `oip.events.exchange`
+ │ Asynchronous   │     • Consumer Queue: `oip.events.ingest`
+ │ RabbitMQ Queue │     • Stateful `CircuitBreaker` (CLOSED -> OPEN -> HALF-OPEN)
+ └───────┬────────┘     • Exponential Backoff Retries: 2s -> 4s -> 8s -> 16s -> 32s
+         │              • Poison Message Isolation: `oip.events.dlq`
+         ▼
  ┌────────────────┐
  │    Step 0      │ ── (Duplicate event_id / client_msg_id in cache?) ──► IGNORED
  │ Deduplication   │
@@ -179,6 +187,13 @@ Every incoming signal (polled via background worker every 60s or received via we
  │ Correlation   │
  └──────┬────────┘
         │ (No deterministic match)
+        ▼
+ ┌───────────────┐
+ │  Step 3.75    │ ── (Text contains Jira issue key e.g. KAN-999?)
+ │ Cross-Platform│    ──► CROSS-PLATFORM LINKED (Slack/GitHub/Gmail -> Jira Investigation)
+ │ Key Linking   │
+ └──────┬────────┘
+        │ (No issue key match)
         ▼
  ┌───────────────┐
  │    Step 4     │
