@@ -9,7 +9,6 @@ import {
   ExternalLink,
   ChevronRight,
   Send,
-  Cpu,
   ShieldAlert,
   Sparkles
 } from 'lucide-react';
@@ -35,9 +34,31 @@ export const InvestigationDetails: React.FC = () => {
   const [slackPostedChannel, setSlackPostedChannel] = useState<string | null>(null);
   const [slackError, setSlackError] = useState<string | null>(null);
 
+  const [resolving, setResolving] = useState(false);
   const [escalatingJira, setEscalatingJira] = useState(false);
   const [jiraTicket, setJiraTicket] = useState<{ key: string; url: string } | null>(null);
   const [jiraError, setJiraError] = useState<string | null>(null);
+  
+  const handleToggleResolve = async () => {
+    if (!id || !investigation) return;
+    setResolving(true);
+    const newStatus = investigation.status === 'resolved' ? 'open' : 'resolved';
+    try {
+      await api.patch(`/investigations/${id}`, { status: newStatus });
+      const statusEvt = {
+        id: Date.now().toString(),
+        type: 'system',
+        text: `Investigation status changed to ${newStatus.toUpperCase()}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setTimelineEvents(prev => [...prev, statusEvt]);
+      await refetchInv();
+    } catch (err: any) {
+      alert(err.response?.data?.detail || err.message || 'Failed to update investigation status.');
+    } finally {
+      setResolving(false);
+    }
+  };
   
   const [timelineEvents, setTimelineEvents] = useState([
     { id: '1', type: 'system', text: 'Investigation opened automatically via SysAlert', time: '10:14 AM' },
@@ -219,18 +240,24 @@ export const InvestigationDetails: React.FC = () => {
             <span>AI Forensics & RCA</span>
           </button>
 
-          {/* Quick AI Diagnose Trigger */}
+          {/* Functional Resolution Toggle */}
           <button 
-            onClick={handleRunDiagnosis}
-            disabled={diagnosing}
-            className="px-3 py-1.5 border border-outline-variant hover:bg-surface-high text-body-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5 text-on-surface"
+            onClick={handleToggleResolve}
+            disabled={resolving}
+            className={`px-3.5 py-1.5 border font-semibold text-body-sm rounded-lg transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50 ${
+              investigation.status === 'resolved'
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                : 'border-outline-variant hover:bg-surface-high text-on-surface'
+            }`}
           >
-            <Cpu className={`w-4 h-4 ${diagnosing ? 'animate-spin' : ''}`} />
-            <span>{diagnosing ? 'Diagnosing...' : 'Re-Run AI'}</span>
-          </button>
-
-          <button className="px-3 py-1.5 border border-outline-variant hover:bg-surface-high text-body-sm font-semibold rounded-lg transition-colors text-on-surface">
-            Mark Resolved
+            <CheckCircle className={`w-4 h-4 ${investigation.status === 'resolved' ? 'text-emerald-600' : 'text-slate-400'}`} />
+            <span>
+              {resolving 
+                ? 'Updating...' 
+                : investigation.status === 'resolved' 
+                ? 'Resolved (Reopen)' 
+                : 'Mark Resolved'}
+            </span>
           </button>
         </div>
       </div>

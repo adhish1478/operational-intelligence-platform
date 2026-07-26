@@ -213,19 +213,30 @@ async def escalate_investigation_to_jira(
     # 4. Decrypt credentials and load config project
     try:
         creds = decrypt_credentials(integration.credentials_encrypted)
-        host_url = creds.get("host_url")
+        access_token = creds.get("access_token")
+        cloud_id = creds.get("cloud_id")
+        site_url = creds.get("site_url")
+        
+        # Legacy fallback
+        host_url = creds.get("host_url") or site_url
         email = creds.get("email")
         api_token = creds.get("api_token")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to decrypt Jira credentials: {str(e)}")
 
-    if not host_url or not email or not api_token:
-        raise HTTPException(status_code=400, detail="Missing Jira connection credentials.")
+    is_oauth = bool(access_token and cloud_id)
+    is_basic = bool(host_url and email and api_token)
+
+    if not is_oauth and not is_basic:
+        raise HTTPException(status_code=400, detail="Missing Jira connection credentials. Please reconnect Jira integration.")
 
     project_list = integration.config.get("tracked_projects", [])
-    project_key = project_list[0] if project_list else "PROD"
+    project_key = "PROD"
+    if project_list:
+        p0 = project_list[0]
+        project_key = p0.get("key") if isinstance(p0, dict) else str(p0)
 
-    # 5. POST to Jira issue creation endpoint (/rest/api/3/issue)
+    # 5. POST to Jira issue creation endpoint
     import httpx
     jira_payload = {
         "fields": {
@@ -259,12 +270,18 @@ async def escalate_investigation_to_jira(
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
-            response = await client.post(
-                f"{host_url}/rest/api/3/issue",
-                headers={"Content-Type": "application/json"},
-                auth=(email, api_token),
-                json=jira_payload
-            )
+            if is_oauth:
+                req_url = f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/issue"
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+                response = await client.post(req_url, headers=headers, json=jira_payload)
+            else:
+                req_url = f"{host_url}/rest/api/3/issue"
+                headers = {"Content-Type": "application/json", "Accept": "application/json"}
+                response = await client.post(req_url, headers=headers, auth=(email, api_token), json=jira_payload)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Jira request failed: {str(e)}")
 
@@ -276,7 +293,8 @@ async def escalate_investigation_to_jira(
 
     res_data = response.json()
     key = res_data.get("key", "UNKNOWN-KEY")
-    ticket_url = f"{host_url}/browse/{key}"
+    base_site_url = site_url or host_url or "https://atlassian.net"
+    ticket_url = f"{base_site_url}/browse/{key}"
 
     # 6. Append Jira ticket key reference back to the investigation suggestion_action for persistence
     esc_suffix = f"\n\n[Escalated to Jira ticket: {key}]"
