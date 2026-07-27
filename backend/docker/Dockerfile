@@ -15,8 +15,9 @@ COPY pyproject.toml .
 RUN touch README.md
 
 # Install build dependencies to create wheels
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip wheel --no-cache-dir --wheel-dir /build/wheels -r <(pip install pip-tools && pip-compile pyproject.toml --stdout)
+RUN pip install --no-cache-dir --upgrade pip pip-tools && \
+    pip-compile pyproject.toml --output-file requirements.txt && \
+    pip wheel --no-cache-dir --wheel-dir /build/wheels -r requirements.txt
 
 # Stage 2: Final runner image
 FROM python:3.11-slim AS runner
