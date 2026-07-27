@@ -66,7 +66,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-securepassword}
       - POSTGRES_DB=${POSTGRES_DB:-oip_db}
-      - MONGO_URL=mongodb://mongodb:27017
+      - MONGODB_URL=mongodb://mongodb:27017
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
       - ENVIRONMENT=development
     depends_on:
@@ -93,7 +93,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-securepassword}
       - POSTGRES_DB=${POSTGRES_DB:-oip_db}
-      - MONGO_URL=mongodb://mongodb:27017
+      - MONGODB_URL=mongodb://mongodb:27017
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
       - ENVIRONMENT=development
     depends_on:
