@@ -216,6 +216,30 @@ Every incoming signal (polled via background worker every 60s or received via we
 
 ### Detailed Stage Specifications:
 
+#### **Step -1: Asynchronous Event Queue Pipeline (RabbitMQ) & Production Considerations**
+
+The messaging tier acts as an asynchronous buffer between incoming platform webhooks and backend database correlation workers. Webhook HTTP handlers (`/api/v1/ingest/...`) immediately serialize raw event envelopes and publish them to RabbitMQ `oip.events.exchange` with a non-blocking `status: queued` response (~5-15ms overhead).
+
+##### **Architecture Details:**
+1. **Exchange & Queue Topology**:
+   - `oip.events.exchange` (Topic Exchange) routes messages by platform key (`event.ingest.<platform>`).
+   - `oip.events.ingest` (Main Consumer Queue) feeds `IngestEventWorker`.
+   - `oip.events.retry` (Exponential Backoff Queue) uses per-message TTL ($2^{\text{retry\_count}} \times 2000\text{ms}$) with `x-dead-letter-exchange: oip.events.exchange` to dead-letter expired retries back to main processing without blocking other messages.
+   - `oip.events.dlq` (Dead Letter Queue) isolates poison messages after `QUEUE_MAX_RETRIES` (5 attempts).
+2. **Circuit Breaker State Machine**:
+   - `CircuitBreaker` in `CLOSED` state monitors worker execution.
+   - Tripped to `OPEN` state after 5 consecutive downstream database/OpenAI failures.
+   - Automatically defers inbound events to the retry queue for a 30s cooldown before probing in `HALF_OPEN` state.
+3. **Resilient Fallback**:
+   - If RabbitMQ broker is unreachable, webhook endpoints seamlessly fall back to synchronous in-process correlation without breaking API execution.
+
+##### **Current Production Limitations & Bottlenecks (Architectural Trade-offs):**
+* **Lack of Consumer Prefetch (QoS Tuning)**: Currently, the worker consumer operates without `channel.set_qos(prefetch_count=N)`. Under high webhook burst events (e.g. 5,000 GitHub push notifications/minute), RabbitMQ delivers all queued messages to the single consumer's memory buffer simultaneously, creating potential worker memory spikes.
+* **Single Worker Replica Scalability Limit**: The current deployment runs a single `IngestEventWorker` event loop instance. While RabbitMQ natively supports competing consumers (multiple worker containers consuming concurrently from `oip.events.ingest`), horizontal auto-scaling (KEDA / HPA) is not yet wired up.
+* **Unmonitored Dead Letter Queue (DLQ)**: Poison messages failing after 5 retries are safely isolated in `oip.events.dlq`, but there is currently no background worker monitoring DLQ depth or triggering automated alert notifications (e.g. PagerDuty / Slack alerts for unprocessable webhooks).
+* **Metrics & Telemetry Observability Gap**: Broker metrics (queue depth, message ingestion rate, consumer lag, retry counts) are currently visible only via the RabbitMQ Management UI (`localhost:15672`) rather than exported directly to a centralized Prometheus / Grafana dashboard.
+* **Basic Connection Recovery**: Utilizes direct async AMQP connection pooling (`aio_pika.connect`) with try-catch fallback rather than `aio_pika.connect_robust()` for automatic silent TCP socket reconnection during transient network partitioning.
+
 #### **Step 0: Event Deduplication**
 In-memory `PROCESSED_EVENT_IDS` set (capped at 10,000 entries, auto-cleared on overflow). Suppresses duplicate `event_id` or `client_msg_id` from Slack retries and webhook replays.
 
