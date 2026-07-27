@@ -33,13 +33,20 @@ app = FastAPI(
 # Set up origins allowing secure integrations with the frontend application
 # In development, wide wildcards are allowed; in production, strict domains are enforced
 origins = [
-    "http://localhost:5173", # Standard Vite default frontend port
+    "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost",
+    "https://localhost",
+    "http://localhost:80",
+    "http://127.0.0.1",
+    "https://127.0.0.1",
+    "http://0.0.0.0:5173",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"^https?://.*$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
