@@ -60,6 +60,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/alembic:/app/alembic
+      - ./backend/tests:/app/tests
     environment:
       - POSTGRES_SERVER=db
       - POSTGRES_PORT=5432

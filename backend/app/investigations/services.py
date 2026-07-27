@@ -3,6 +3,7 @@ from typing import Sequence, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from app.auth.models import User
 from app.investigations.models import Investigation, Diagnosis
 from app.investigations.schemas import InvestigationCreate, InvestigationUpdate
 
@@ -25,9 +26,14 @@ class InvestigationService:
     async def create_investigation(
         db: AsyncSession, organization_id: uuid.UUID, investigation_in: InvestigationCreate
     )-> Investigation:
+        data = investigation_in.model_dump(exclude_unset=True)
+        suggested_act = data.pop("suggested_action", None)
+        if suggested_act and not data.get("suggestion_action"):
+            data["suggestion_action"] = suggested_act
+
         investigation = Investigation(
             organization_id = organization_id,
-            **investigation_in.model_dump()
+            **data
         )
         db.add(investigation)
 
@@ -67,89 +73,92 @@ class DiagnosisService:
         db: AsyncSession,
         mongo_db: Any,
         investigation: Investigation,
-        triggered_by_id: uuid.UUID
+        triggered_by_id: uuid.UUID,
+        event_callback: Any | None = None
     ) -> Diagnosis:
-        from openai import AsyncOpenAI
-        from app.core.config import settings
         from app.evidence.services import EvidenceService
+        from app.investigations.multi_agent import MultiAgentOrchestrator
 
         # 1. Fetch all evidence for the investigation chronologically from MongoDB
         evidence_list = await EvidenceService.list_investigation_evidence(mongo_db, investigation.id)
-        
-        # Compile the timeline context
-        timeline = ""
-        for idx, ev in enumerate(evidence_list, 1):
-            timeline += f"{idx}. [{ev.created_at.isoformat()}] Platform: {ev.type} | Author: {ev.author_name} | Summary: {ev.summary}\n"
-            if ev.source_url:
-                timeline += f"   URL: {ev.source_url}\n"
-            timeline += f"   Raw Details: {ev.metadata}\n\n"
+        evidence_dicts = [
+            {
+                "id": str(ev.id),
+                "type": ev.type,
+                "author_name": ev.author_name,
+                "summary": ev.summary,
+                "source_url": ev.source_url,
+                "metadata": ev.metadata,
+                "created_at": ev.created_at.isoformat() if ev.created_at else None,
+            }
+            for ev in evidence_list
+        ]
 
-            
-        system_prompt = (
-            "You are Antigravity AI, an expert Lead Site Reliability Engineer and Forensic Incident Analyst.\n"
-            "Analyze the provided chronological timeline of evidence logs for an operational incident investigation.\n"
-            "Generate a structured, highly professional Markdown diagnosis report with the following exact section headers:\n\n"
-            "### 🚨 Incident Overview\n"
-            "A concise 2-sentence summary of the active incident.\n\n"
-            "### 🔍 Estimated Root Cause\n"
-            "Direct technical explanation of the likely root cause based on telemetry evidence.\n\n"
-            "### ⏱️ Key Telemetry Timeline\n"
-            "Bullet list of critical events across platforms with timestamps and platform names.\n\n"
-            "### ⚡ Actionable Remediation & Hotfix\n"
-            "Numbered step-by-step hotfix/mitigation instructions for engineering on-call.\n\n"
-            "Keep the report under 350 words. Be direct, technical, and precise."
+        # 2. Run Multi-Agent DAG Orchestrator
+        orchestrator = MultiAgentOrchestrator()
+        dag_output = await orchestrator.run_dag_analysis(
+            investigation_title=investigation.title,
+            investigation_description=investigation.description or "",
+            severity=investigation.severity,
+            evidence_items=evidence_dicts,
+            event_callback=event_callback,
         )
-        
-        user_content = (
-            f"Investigation Title: {investigation.title}\n"
-            f"Investigation Description: {investigation.description}\n\n"
-            f"Chronological Evidence Timeline:\n{timeline}"
-        )
-        
-        report_summary = ""
-        if settings.OPENAI_API_KEY:
-            try:
-                client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-                completion = await client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_content}
-                    ],
-                    max_tokens=500,
-                    temperature=0.2
-                )
-                report_summary = completion.choices[0].message.content or ""
-            except Exception as e:
-                # Fallback to local detailed summary in case of API connection error
-                report_summary = f"[AI Engine Exception, fallback report generated]\nRoot Cause: {investigation.title}. Details: {str(e)}"
-        
-        if not report_summary:
-            # Fallback mock report generation if OpenAI key is not present or failed
-            report_summary = (
-                f"--- DIAGNOSIS REPORT FOR: {investigation.title} ---\n"
-                f"Root Cause: Multiple system failure alerts detected.\n"
-                f"Evidence Summary: Found {len(evidence_list)} logs spanning platforms.\n"
-                f"Recommendation: Review error logs and trace resource exhaustion bottlenecks."
-            )
 
-        # 2. Save Diagnosis to PostgreSQL
+        rca = dag_output.technical_rca
+        impact = dag_output.business_impact
+        remediation = dag_output.remediation_plan
+
+        # 3. Format unified Markdown report summary for backwards compatibility (UI, Slack, Jira)
+        report_summary = (
+            f"### Incident Executive Summary\n"
+            f"{dag_output.executive_summary}\n\n"
+            f"### Technical Root Cause Analysis\n"
+            f"{rca.root_cause_summary}\n\n"
+            f"**Impacted Services:** {', '.join(rca.impacted_services) if rca.impacted_services else 'N/A'}\n"
+            f"**Offending Commit:** `{rca.offending_commit.hash if rca.offending_commit else 'N/A'}` by {rca.offending_commit.author if rca.offending_commit else 'Unknown'}\n\n"
+            f"### Business Impact & SLA Assessment\n"
+            f"* **Financial Risk Level:** `{impact.financial_risk_level}` (${impact.estimated_downtime_cost_per_hour:,.2f}/hr exposure)\n"
+            f"* **SLA Status:** `{impact.sla_breach_status}`\n"
+            f"* **Cross-Functional Blast Radius:** {', '.join(impact.cross_functional_blast_radius)}\n\n"
+            f"### Actionable Remediation & Hotfix\n"
+        )
+        for idx, step in enumerate(remediation.immediate_mitigation_steps, 1):
+            report_summary += f"{step if step.startswith(str(idx)) else f'{idx}. {step}'}\n"
+
+        report_summary += f"\n**Git Rollback Command:**\n```bash\n{remediation.git_rollback_command}\n```\n"
+
+        # 4. Validate triggered_by_id user FK
+        valid_user_id = None
+        if triggered_by_id:
+            user_check = await db.execute(select(User.id).where(User.id == triggered_by_id))
+            if user_check.scalar_one_or_none():
+                valid_user_id = triggered_by_id
+
+        # Save Diagnosis to PostgreSQL with structured JSON columns
         diagnosis = Diagnosis(
             investigation_id=investigation.id,
-            triggered_by_id=triggered_by_id,
-            report_summary=report_summary
+            triggered_by_id=valid_user_id,
+            report_summary=report_summary,
+            technical_rca=rca.model_dump(),
+            business_impact=impact.model_dump(),
+            remediation_plan=remediation.model_dump(),
+            orchestration_metadata={
+                "triage_mode": dag_output.triage_mode,
+                "evidence_count": len(evidence_list),
+                "severity": investigation.severity,
+            }
         )
         db.add(diagnosis)
-        
-        # 3. Update the investigation status to "investigating" and save suggestions
+
+        # 5. Update parent investigation status and suggestion
         investigation.status = "investigating"
-        investigation.suggestion_action = report_summary
+        investigation.suggested_action = report_summary
         db.add(investigation)
-        
+
         await db.commit()
         await db.refresh(diagnosis)
         await db.refresh(investigation)
-        
+
         return diagnosis
 
 

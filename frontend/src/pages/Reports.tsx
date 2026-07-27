@@ -1,30 +1,84 @@
 import React from 'react';
-import { FileBarChart, Download, Plus, AlertCircle, ShieldAlert, Award } from 'lucide-react';
+import { FileBarChart, Download, AlertCircle, ShieldAlert, Award } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
-
-interface ReportItem {
-  id: string;
-  title: string;
-  type: 'Weekly Digest' | 'Incident Summary' | 'Security Audit';
-  date: string;
-  impactSummary: string;
-}
+import { mapInvestigation } from '../lib/mappers';
+import type { OperationalInvestigation } from '../types';
 
 export const Reports: React.FC = () => {
-  const staticReports: ReportItem[] = [
-    { id: '1', title: 'Q2 Authentication Services SLA Audit', type: 'Security Audit', date: '2026-06-12', impactSummary: 'Assesses Auth Gateway Redis connection spikes. Outlines 4 recommendations for branch configuration policies.' },
-    { id: '2', title: 'Weekly Operational Intelligence Digest - W24', type: 'Weekly Digest', date: '2026-06-08', impactSummary: 'Summarizes TechCorp customer escalation details, developer blockers velocity impact, and connected workspace sync status.' },
-    { id: '3', title: 'Major Incident Post-Mortem: Auth Spikes', type: 'Incident Summary', date: '2026-06-02', impactSummary: 'Full timeline breakdown of Redis handshake timeout outages affecting customer logins. Identifies pool size gaps.' }
-  ];
-
   // Fetch Live SLA Metrics from API
-  const { data: digest, isLoading } = useQuery({
+  const { data: digest, isLoading: isDigestLoading } = useQuery({
     queryKey: ['reports-digest'],
     queryFn: () => api.get('/reports/digest')
   });
 
-  if (isLoading) {
+  // Fetch Live Investigations to construct actual operational report items
+  const { data: rawInvs, isLoading: isInvsLoading } = useQuery({
+    queryKey: ['reports-investigations'],
+    queryFn: () => api.get('/investigations/')
+  });
+
+  const investigations: OperationalInvestigation[] = (rawInvs || []).map(mapInvestigation);
+
+  const reports = investigations.length > 0
+    ? investigations.map((inv) => ({
+        id: inv.id,
+        title: `Post-Mortem: ${inv.title}`,
+        type: (inv.severity === 'critical' ? 'Incident Post-Mortem' : inv.severity === 'high' ? 'Security Audit' : 'Weekly Digest') as any,
+        date: inv.detectedAt ? new Date(inv.detectedAt).toISOString().split('T')[0] : '2026-07-27',
+        impactSummary: inv.suggestedAction || inv.description || 'Assesses system root causes, telemetry logs, and remediation policies.'
+      }))
+    : [
+        { 
+          id: '1', 
+          title: 'Q2 Authentication Services SLA Audit', 
+          type: 'Security Audit' as const, 
+          date: '2026-06-12', 
+          impactSummary: 'Assesses Auth Gateway Redis connection spikes. Outlines 4 recommendations for branch configuration policies.' 
+        },
+        { 
+          id: '2', 
+          title: 'Weekly Operational Intelligence Digest - W24', 
+          type: 'Weekly Digest' as const, 
+          date: '2026-06-08', 
+          impactSummary: 'Summarizes TechCorp customer escalation details, developer blockers velocity impact, and connected workspace sync status.' 
+        }
+      ];
+
+  const handleExportPdf = (rep: { title: string; type: string; date: string; impactSummary: string }) => {
+    const reportText = `==================================================
+OPERATIONAL INTELLIGENCE REPORT
+==================================================
+Title: ${rep.title}
+Report Type: ${rep.type}
+Generated Date: ${rep.date}
+
+EXECUTIVE SUMMARY & IMPACT:
+--------------------------------------------------
+${rep.impactSummary}
+
+RECOMMENDED ACTIONS & SLA POLICY:
+--------------------------------------------------
+1. Conduct root cause verification across telemetry streams.
+2. Ensure automated rollback scripts are verified against staging environment.
+3. Review SLA response thresholds and update team escalation routing.
+
+==================================================
+Service Assistant Operational Intelligence Platform
+`;
+
+    const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${rep.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_report.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  if (isDigestLoading || isInvsLoading) {
     return (
       <div className="max-w-6xl mx-auto py-24 text-center font-mono text-xs text-on-surface-variant animate-pulse">
         Generating intelligence digest...
@@ -40,7 +94,7 @@ export const Reports: React.FC = () => {
         <div>
           <h1 className="text-headline-lg text-on-surface">Operational Reports</h1>
           <p className="text-body-md text-on-surface-variant">
-            Automated intelligence reports, SLA audits, and cross-platform post-mortems.
+            Automated intelligence reports, SLA audits, and cross-platform post-mortems for your active organization.
           </p>
         </div>
       </div>
@@ -93,7 +147,7 @@ export const Reports: React.FC = () => {
 
       {/* Reports Grid List */}
       <div className="space-y-4">
-        {staticReports.map(rep => (
+        {reports.map(rep => (
           <div key={rep.id} className="bg-surface border border-outline-variant rounded-lg p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 hover:border-outline transition-colors">
             
             <div className="flex items-start gap-4">
@@ -112,7 +166,7 @@ export const Reports: React.FC = () => {
                 <h3 className="text-headline-sm font-semibold text-on-surface hover:text-primary transition-colors cursor-pointer">
                   {rep.title}
                 </h3>
-                <p className="text-body-sm text-on-surface-variant mt-1.5 max-w-2xl">
+                <p className="text-body-sm text-on-surface-variant mt-1.5 max-w-2xl line-clamp-2">
                   {rep.impactSummary}
                 </p>
               </div>
@@ -120,13 +174,12 @@ export const Reports: React.FC = () => {
 
             {/* Actions */}
             <div className="flex items-center gap-2 shrink-0 w-full md:w-auto border-t md:border-t-0 border-outline-variant/40 pt-3 md:pt-0">
-              <button className="flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-outline-variant hover:bg-surface-high text-body-sm font-semibold text-on-surface transition-colors">
+              <button 
+                onClick={() => handleExportPdf(rep)}
+                className="flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-outline-variant hover:bg-surface-high text-body-sm font-semibold text-on-surface transition-colors"
+              >
                 <Download className="w-4 h-4" />
                 <span>Export PDF</span>
-              </button>
-              <button className="flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-primary hover:bg-slate-800 text-white text-body-sm font-semibold transition-colors">
-                <Plus className="w-4 h-4" />
-                <span>Triage Items</span>
               </button>
             </div>
 

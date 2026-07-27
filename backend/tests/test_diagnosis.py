@@ -1,6 +1,7 @@
 import pytest
 import pytest_asyncio
 import uuid
+from unittest.mock import patch
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -17,10 +18,14 @@ pytestmark = pytest.mark.asyncio
 @pytest_asyncio.fixture(autouse=True)
 async def clean_mongo():
     """Ensure the MongoDB evidence collection is empty before and after each test."""
+    from app.core.config import settings
+    orig_key = settings.OPENAI_API_KEY
+    settings.OPENAI_API_KEY = None
     db = get_mongo_db()
     await db.evidence.delete_many({})
     yield
     await db.evidence.delete_many({})
+    settings.OPENAI_API_KEY = orig_key
 
 
 async def test_run_investigation_diagnosis_flow(client: AsyncClient, db_session: AsyncSession):
@@ -87,7 +92,7 @@ async def test_run_investigation_diagnosis_flow(client: AsyncClient, db_session:
     # Investigation status should be updated to "investigating" and suggestion_action saved
     await db_session.refresh(inv)
     assert inv.status == "investigating"
-    assert inv.suggestion_action == result["report_summary"]
+    assert inv.suggested_action == result["report_summary"]
 
     # Verify a Diagnosis row was created
     statement = select(Diagnosis).where(Diagnosis.investigation_id == inv.id)

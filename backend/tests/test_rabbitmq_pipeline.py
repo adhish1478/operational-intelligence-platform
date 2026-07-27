@@ -96,7 +96,12 @@ async def test_worker_retry_and_dlq_routing():
     mock_msg.process.return_value.__aexit__ = AsyncMock()
     mock_msg.body = str(envelope_retry).replace("'", '"').encode("utf-8")
 
-    with patch("app.queues.worker.IngestService.correlate_and_process", side_effect=ValueError("Simulated DB Failure")):
+    mock_integration = MagicMock()
+    mock_db = AsyncMock()
+    mock_db.execute.return_value.scalars.return_value.first.return_value = mock_integration
+
+    with patch("app.queues.worker.AsyncSessionLocal", return_value=mock_db), \
+         patch("app.queues.worker.IngestService.correlate_and_process", side_effect=RuntimeError("Simulated DB Connection Failure")):
         await worker.process_message(mock_msg)
 
     # Verify requeue_with_backoff called with retry_count + 1 = 2 and backoff = 2000 * 2^1 = 4000ms
@@ -114,7 +119,8 @@ async def test_worker_retry_and_dlq_routing():
     mock_msg_dlq.process.return_value.__aexit__ = AsyncMock()
     mock_msg_dlq.body = str(envelope_dlq).replace("'", '"').encode("utf-8")
 
-    with patch("app.queues.worker.IngestService.correlate_and_process", side_effect=ValueError("Simulated Fatal Error")):
+    with patch("app.queues.worker.AsyncSessionLocal", return_value=mock_db), \
+         patch("app.queues.worker.IngestService.correlate_and_process", side_effect=RuntimeError("Simulated DB Connection Failure")):
         await worker.process_message(mock_msg_dlq)
 
     # Verify publish_to_dlq called

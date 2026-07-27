@@ -5,7 +5,6 @@ import {
     Layers,
     FileBarChart,
     Settings,
-    ChevronDown,
     Zap,
     LogOut
 } from 'lucide-react';
@@ -30,9 +29,9 @@ export const Sidebar: React.FC = () => {
     const { user, activeOrgId, logout } = useAuthStore();
 
     // Find active organization details
-    const activeOrg = user?.organizations?.find(o => o.id === activeOrgId);
-    const orgName = activeOrg ? activeOrg.name : 'Global Workspace';
-    const orgSlug = activeOrg ? activeOrg.slug : 'global-ops';
+    const activeOrg = user?.organizations?.find(o => o.id === activeOrgId) || user?.organizations?.[0];
+    const orgName = activeOrg ? activeOrg.name : 'Platform Engineering';
+    const orgSlug = activeOrg ? activeOrg.slug : 'platform-eng';
 
     // Calculate avatar initials
     const initials = user?.first_name 
@@ -65,18 +64,17 @@ export const Sidebar: React.FC = () => {
 
     return (
         <aside className="w-[240px] bg-surface-low border-r border-outline-variant flex flex-col h-screen sticky top-0">
-            {/* Workspace / Org Switcher */}
+            {/* User Organization Header */}
             <div className="p-4 border-b border-outline-variant">
-                <button className="w-full flex items-center gap-2 p-2 rounded bg-surface border border-outline-variant hover:bg-surface-high transition-colors text-left group">
-                    <div className="w-6 h-6 rounded bg-primary flex items-center justify-center shrink-0">
-                        <Zap className="text-white w-4.5 h-4.5 fill-current" />
+                <div className="flex items-center gap-2.5 p-2 rounded bg-surface border border-outline-variant text-left">
+                    <div className="w-7 h-7 rounded bg-slate-900 flex items-center justify-center shrink-0">
+                        <Zap className="text-white w-4 h-4 fill-current" />
                     </div>
                     <div className="flex-1 min-w-0">
-                        <h4 className="text-body-sm font-semibold truncate text-on-surface">{orgName}</h4>
-                        <p className="text-[10px] text-on-surface-variant truncate">{orgSlug}</p>
+                        <h4 className="text-body-sm font-bold truncate text-on-surface">{orgName}</h4>
+                        <p className="text-[10px] font-mono text-on-surface-variant truncate">{orgSlug}</p>
                     </div>
-                    <ChevronDown className="w-4 h-4 text-on-surface-variant group-hover:text-on-surface shrink-0" />
-                </button>
+                </div>
             </div>
 
             {/* Navigation links */}

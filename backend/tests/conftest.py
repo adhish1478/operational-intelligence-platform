@@ -1,3 +1,7 @@
+import os
+os.environ["ENVIRONMENT"] = "testing"
+if os.environ.get("POSTGRES_SERVER") == "db":
+    os.environ.setdefault("MONGODB_URL", "mongodb://mongodb:27017")
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator

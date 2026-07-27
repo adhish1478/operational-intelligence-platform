@@ -95,6 +95,12 @@ class IngestEventWorker:
                 self.circuit_breaker.record_success()
                 logger.info(f"✅ Event {event_id} ({platform}) processed successfully.")
 
+            except ValueError as val_err:
+                logger.warning(f"⚠️ Non-retryable integration error for event {event_id} ({platform}): {val_err}. Routing to DLQ.")
+                await self.manager.publish_to_dlq(
+                    envelope,
+                    error_reason=f"Integration Validation Error: {val_err}"
+                )
             except Exception as proc_err:
                 logger.error(f"❌ Error processing event {event_id} ({platform}): {proc_err}")
                 self.circuit_breaker.record_failure()

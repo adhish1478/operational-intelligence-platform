@@ -6,10 +6,9 @@ import {
   GitPullRequest, 
   AlertTriangle,
   Play,
-  UserPlus,
   CheckCircle2
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { mapInvestigation, mapEvidence } from '../lib/mappers';
 import { useAuthStore } from '../store/authStore';
@@ -18,6 +17,7 @@ import { EvidenceDetailModal } from '../components/EvidenceDetailModal';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const operatorName = user?.first_name || 'Operator';
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
@@ -25,6 +25,13 @@ export const Dashboard: React.FC = () => {
   const { data: rawInvs, isLoading } = useQuery({
     queryKey: ['investigations'],
     queryFn: () => api.get('/investigations/')
+  });
+
+  const { mutate: quickResolve } = useMutation({
+    mutationFn: (id: string) => api.patch(`/investigations/${id}`, { status: 'resolved' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['investigations'] });
+    }
   });
 
   const { data: recentEvidence, isLoading: isEvidenceLoading } = useQuery({
@@ -165,16 +172,17 @@ export const Dashboard: React.FC = () => {
 
                   <div className="flex items-center gap-2">
                     <button 
-                      onClick={() => navigate(`/investigations/${inv.id}`)}
+                      onClick={() => navigate(`/investigations/${inv.id}?autoDiagnose=true`)}
                       className="flex-1 flex items-center justify-center gap-1.5 bg-primary hover:bg-slate-800 text-white font-semibold text-[12px] py-1.5 px-2.5 rounded transition-colors"
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
                       <span>Diagnose</span>
                     </button>
-                    <button className="flex items-center justify-center p-1.5 rounded border border-outline-variant hover:bg-surface-high text-on-surface-variant hover:text-on-surface transition-colors" title="Assign Owner">
-                      <UserPlus className="w-4 h-4" />
-                    </button>
-                    <button className="flex items-center justify-center p-1.5 rounded border border-outline-variant hover:bg-surface-high text-on-surface-variant hover:text-on-surface transition-colors" title="Mark Resolved">
+                    <button 
+                      onClick={() => quickResolve(inv.id)}
+                      className="flex items-center justify-center p-2 rounded border border-outline-variant hover:bg-emerald-50 hover:border-emerald-300 text-on-surface-variant hover:text-emerald-700 transition-colors" 
+                      title="Mark Resolved"
+                    >
                       <CheckCircle2 className="w-4 h-4 text-success" />
                     </button>
                   </div>
@@ -185,57 +193,31 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Side-by-Side: Business Impact Targets & Latest Evidence Highlights */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Business Impact Section */}
-        <div className="space-y-3">
-          <h3 className="text-headline-sm text-on-surface uppercase tracking-wider text-outline font-bold">Threatened Business Targets</h3>
-          <div className="bg-surface border border-outline-variant rounded-lg p-4 space-y-4">
-            <div className="flex items-start gap-3 border-b border-outline-variant pb-3">
-              <div className="w-8 h-8 rounded bg-error/10 text-error flex items-center justify-center font-bold text-sm shrink-0">
-                $
-              </div>
-              <div>
-                <h4 className="text-body-sm font-semibold text-on-surface">$124k Revenue SLA at Risk</h4>
-                <p className="text-[11px] text-on-surface-variant">TechCorp enterprise workspace authentication timeouts approaching SLA tier-1 boundaries.</p>
-              </div>
+      {/* Global Recent Evidence Feed Highlights */}
+      <div className="space-y-3">
+        <h3 className="text-headline-sm text-on-surface uppercase tracking-wider text-outline font-bold">Active Signal Stream</h3>
+        <div className="bg-surface border border-outline-variant rounded-lg p-4 space-y-3">
+          {isEvidenceLoading ? (
+            <div className="text-center font-mono text-xs text-on-surface-variant py-4 animate-pulse">
+              Loading telemetry stream...
             </div>
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded bg-warning/10 text-warning flex items-center justify-center font-bold text-sm shrink-0">
-                T
-              </div>
-              <div>
-                <h4 className="text-body-sm font-semibold text-on-surface">Team Blockers: Core Platform</h4>
-                <p className="text-[11px] text-on-surface-variant">2 critical bottlenecks on Auth Gateway holding up 12 developer workflows across 3 downstream pods.</p>
-              </div>
+          ) : evidenceList.length === 0 ? (
+            <div className="text-center font-mono text-xs text-on-surface-variant py-4">
+              No active signals recorded.
             </div>
-          </div>
-        </div>
-
-        {/* Global Recent Evidence Feed Highlights */}
-        <div className="space-y-3">
-          <h3 className="text-headline-sm text-on-surface uppercase tracking-wider text-outline font-bold">Active Signal Stream</h3>
-          <div className="bg-surface border border-outline-variant rounded-lg p-4 space-y-3">
-            {isEvidenceLoading ? (
-              <div className="text-center font-mono text-xs text-on-surface-variant py-4 animate-pulse">
-                Loading telemetry stream...
-              </div>
-            ) : evidenceList.length === 0 ? (
-              <div className="text-center font-mono text-xs text-on-surface-variant py-4">
-                No active signals recorded.
-              </div>
-            ) : (
-              evidenceList.map((ev: Evidence) => (
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {evidenceList.map((ev: Evidence) => (
                 <div 
                   key={ev.id} 
                   onClick={() => setSelectedEvidence(ev)}
-                  className="flex items-center justify-between text-body-sm py-1.5 px-2 border-b border-outline-variant/40 last:border-0 cursor-pointer hover:bg-surface-low rounded transition-colors group"
+                  className="flex items-center justify-between text-body-sm p-3 border border-outline-variant/40 hover:bg-surface-low rounded-lg transition-colors cursor-pointer group"
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-low group-hover:bg-surface border border-outline-variant/60 text-on-surface-variant uppercase font-semibold shrink-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-low group-hover:bg-surface border border-outline-variant/60 text-on-surface-variant uppercase font-semibold shrink-0">
                       {ev.type}
                     </span>
-                    <span className="text-on-surface text-[12px] truncate group-hover:text-primary transition-colors" title={ev.summary}>
+                    <span className="text-on-surface text-[12px] font-medium truncate group-hover:text-primary transition-colors" title={ev.summary}>
                       {ev.summary}
                     </span>
                   </div>
@@ -243,9 +225,9 @@ export const Dashboard: React.FC = () => {
                     {new Date(ev.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
-              ))
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

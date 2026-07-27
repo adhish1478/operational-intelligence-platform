@@ -164,4 +164,55 @@ export const api = {
     
   delete: (path: string, options?: RequestInit) => 
     request(path, { ...options, method: 'DELETE' }),
+
+  stream: async (path: string, onEvent: (eventType: string, payload: any) => void) => {
+    const { activeOrgId, token } = useAuthStore.getState();
+    const headers: Record<string, string> = {
+      'Accept': 'text/event-stream'
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (activeOrgId) headers['X-Organization-ID'] = activeOrgId;
+
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    const apiPath = cleanPath.startsWith('/api/v1/') ? cleanPath : `/api/v1${cleanPath}`;
+
+    const response = await fetch(`${BASE_URL}${apiPath}`, {
+      method: 'GET',
+      headers,
+      credentials: 'include'
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`SSE stream failed with status ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
+
+      for (const part of parts) {
+        if (!part.trim()) continue;
+        const eventMatch = part.match(/^event:\s*(.+)$/m);
+        const dataMatch = part.match(/^data:\s*([\s\S]+)$/m);
+
+        if (eventMatch && dataMatch) {
+          const eventType = eventMatch[1].trim();
+          try {
+            const payload = JSON.parse(dataMatch[1].trim());
+            onEvent(eventType, payload);
+          } catch (e) {
+            console.error('Failed to parse SSE JSON payload', e);
+          }
+        }
+      }
+    }
+  }
 };

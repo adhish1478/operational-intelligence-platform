@@ -1,7 +1,9 @@
 import uuid
+import asyncio
 from typing import Any
 from sqlalchemy import select
 from fastapi import status, APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from app.api.deps import DBSessionDep, ActiveOrganizationDep, MongoSessionDep, CurrentUserDep
 from app.investigations.schemas import (
     InvestigationCreate,
@@ -87,6 +89,85 @@ async def run_investigation_diagnosis(
     return await DiagnosisService.generate_diagnosis_report(
         db, mongo_db, investigation, current_user.id
     )
+
+
+@router.get('/{id}/diagnose/stream')
+async def stream_investigation_diagnosis(
+    db: DBSessionDep,
+    mongo_db: MongoSessionDep,
+    org: ActiveOrganizationDep,
+    current_user: CurrentUserDep,
+    id: uuid.UUID
+) -> StreamingResponse:
+    """
+    Server-Sent Events (SSE) endpoint streaming real-time DAG multi-agent execution milestones to the frontend.
+    """
+    import json
+    from fastapi.responses import StreamingResponse
+
+    investigation = await InvestigationService.get_investigation_by_id(db, id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="investigation not found")
+        
+    if investigation.organization_id != org.id:
+        raise HTTPException(status_code=403, detail="Forbidden: Result belongs to another tenant")
+
+    async def event_generator():
+        queue = asyncio.Queue()
+
+        async def callback(event_name: str, data: dict[str, Any]):
+            await queue.put({"event": event_name, "data": data})
+
+        async def run_analysis():
+            try:
+                diag = await DiagnosisService.generate_diagnosis_report(
+                    db, mongo_db, investigation, current_user.id, event_callback=callback
+                )
+                await queue.put({
+                    "event": "finished",
+                    "data": {
+                        "diagnosis_id": str(diag.id),
+                        "report_summary": diag.report_summary,
+                        "technical_rca": diag.technical_rca,
+                        "business_impact": diag.business_impact,
+                        "remediation_plan": diag.remediation_plan,
+                    }
+                })
+            except Exception as e:
+                await queue.put({"event": "error", "data": {"message": str(e)}})
+            finally:
+                await queue.put(None) # Sentinel to close stream
+
+        asyncio.create_task(run_analysis())
+
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            event_type = item["event"]
+            payload = json.dumps(item["data"])
+            yield f"event: {event_type}\ndata: {payload}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get('/{id}/diagnoses', response_model=list[DiagnosisRead])
+async def list_investigation_diagnoses(
+    db: DBSessionDep,
+    org: ActiveOrganizationDep,
+    id: uuid.UUID
+) -> Any:
+    """
+    Fetch all diagnosis reports (including structured multi-agent outputs) for an investigation.
+    """
+    investigation = await InvestigationService.get_investigation_by_id(db, id)
+    if not investigation:
+        raise HTTPException(status_code=404, detail="investigation not found")
+        
+    if investigation.organization_id != org.id:
+        raise HTTPException(status_code=403, detail="Forbidden: Result belongs to another tenant")
+
+    return await DiagnosisService.list_investigation_diagnoses(db, id)
 
 
 @router.post('/{id}/share-slack')
