@@ -299,14 +299,14 @@ export const AiDiagnosisModal: React.FC<AiDiagnosisModalProps> = ({
                     </p>
                   </div>
 
-                  {technicalRca.offending_commit && (
+                  {technicalRca.offending_commit && technicalRca.offending_commit.hash && technicalRca.offending_commit.hash !== 'HEAD~1' && (
                     <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-amber-700 uppercase font-mono flex items-center gap-1.5">
                           <GitCommit className="w-4 h-4" /> Offending Commit Details
                         </span>
                         <code className="text-xs font-mono font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded">
-                          {technicalRca.offending_commit.hash || 'HEAD~1'}
+                          {technicalRca.offending_commit.hash}
                         </code>
                       </div>
                       <p className="text-xs text-slate-700"><strong>Author:</strong> {technicalRca.offending_commit.author || 'Unknown'}</p>
@@ -333,13 +333,17 @@ export const AiDiagnosisModal: React.FC<AiDiagnosisModalProps> = ({
 
                     <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                       <h5 className="text-xs font-bold text-slate-700 font-mono uppercase">Error Signatures</h5>
-                      <div className="flex flex-wrap gap-1.5">
-                        {technicalRca.error_fingerprints?.map((fp: string) => (
-                          <span key={fp} className="px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200 text-xs font-mono font-bold">
-                            {fp}
-                          </span>
-                        ))}
-                      </div>
+                      {technicalRca.error_fingerprints && technicalRca.error_fingerprints.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {technicalRca.error_fingerprints.map((fp: string) => (
+                            <span key={fp} className="px-2 py-1 rounded bg-red-50 text-red-700 border border-red-200 text-xs font-mono font-bold">
+                              {fp}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">None detected in evidence stream</span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -349,11 +353,11 @@ export const AiDiagnosisModal: React.FC<AiDiagnosisModalProps> = ({
               {activeTab === 'business' && businessImpact && (
                 <div className="space-y-5">
                   <div className="grid grid-cols-3 gap-4">
-                    <div className="p-4 bg-red-50/70 border border-red-200 rounded-xl space-y-1">
-                      <span className="text-[10px] font-mono text-red-600 font-bold uppercase">Financial Exposure</span>
-                      <div className="text-2xl font-black text-red-900 font-mono flex items-center">
-                        <DollarSign className="w-5 h-5 text-red-600" />
-                        {businessImpact.estimated_downtime_cost_per_hour?.toLocaleString()}/hr
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                      <span className="text-[10px] font-mono text-slate-500 font-bold uppercase">Financial Exposure</span>
+                      <div className="text-2xl font-black text-slate-900 font-mono flex items-center">
+                        <DollarSign className="w-5 h-5 text-slate-600" />
+                        {businessImpact.estimated_downtime_cost_per_hour?.toLocaleString() || 0}/hr
                       </div>
                     </div>
 
@@ -378,19 +382,23 @@ export const AiDiagnosisModal: React.FC<AiDiagnosisModalProps> = ({
                     <h5 className="text-xs font-bold text-slate-700 font-mono uppercase flex items-center gap-1.5">
                       <UserCheck className="w-4 h-4 text-slate-700" /> Affected Customer Tiers
                     </h5>
-                    <div className="space-y-2">
-                      {businessImpact.affected_customer_tiers?.map((ct: any, idx: number) => (
-                        <div key={idx} className="p-3 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs">
-                          <div>
-                            <span className="font-bold text-slate-900">{ct.tier}</span>
-                            <p className="text-slate-500 mt-0.5">{ct.impact_summary}</p>
+                    {businessImpact.affected_customer_tiers && businessImpact.affected_customer_tiers.length > 0 ? (
+                      <div className="space-y-2">
+                        {businessImpact.affected_customer_tiers.map((ct: any, idx: number) => (
+                          <div key={idx} className="p-3 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-xs">
+                            <div>
+                              <span className="font-bold text-slate-900">{ct.tier}</span>
+                              <p className="text-slate-500 mt-0.5">{ct.impact_summary}</p>
+                            </div>
+                            <span className="px-2 py-1 bg-slate-100 text-slate-800 border border-slate-200 font-mono font-bold rounded">
+                              {ct.account_count} Tenant Accounts
+                            </span>
                           </div>
-                          <span className="px-2 py-1 bg-slate-100 text-slate-800 border border-slate-200 font-mono font-bold rounded">
-                            {ct.account_count} Tenant Accounts
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 italic">No specific tenant account tiers identified in evidence stream.</p>
+                    )}
                   </div>
                 </div>
               )}
@@ -403,17 +411,25 @@ export const AiDiagnosisModal: React.FC<AiDiagnosisModalProps> = ({
                       <span className="text-xs font-mono font-bold text-emerald-400 uppercase flex items-center gap-1.5">
                         <Terminal className="w-4 h-4" /> Git Rollback Command
                       </span>
-                      <button
-                        onClick={() => handleCopyCommand(remediationPlan.git_rollback_command)}
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-mono transition-colors flex items-center gap-1"
-                      >
-                        {copiedCommand ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedCommand ? 'Copied' : 'Copy'}</span>
-                      </button>
+                      {remediationPlan.git_rollback_command && !remediationPlan.git_rollback_command.startsWith('N/A') && (
+                        <button
+                          onClick={() => handleCopyCommand(remediationPlan.git_rollback_command)}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-mono transition-colors flex items-center gap-1"
+                        >
+                          {copiedCommand ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedCommand ? 'Copied' : 'Copy'}</span>
+                        </button>
+                      )}
                     </div>
-                    <pre className="p-3 bg-black rounded-lg text-emerald-400 font-mono text-xs overflow-x-auto border border-slate-800">
-                      {remediationPlan.git_rollback_command}
-                    </pre>
+                    {remediationPlan.git_rollback_command && !remediationPlan.git_rollback_command.startsWith('N/A') ? (
+                      <pre className="p-3 bg-black rounded-lg text-emerald-400 font-mono text-xs overflow-x-auto border border-slate-800">
+                        {remediationPlan.git_rollback_command}
+                      </pre>
+                    ) : (
+                      <div className="p-3 bg-slate-800/80 rounded-lg text-slate-400 font-mono text-xs border border-slate-700">
+                        N/A — No code commit recorded in evidence to revert.
+                      </div>
+                    )}
                   </div>
 
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">

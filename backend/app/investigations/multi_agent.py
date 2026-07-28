@@ -124,9 +124,13 @@ class MultiAgentOrchestrator:
                         "role": "system",
                         "content": (
                             "You are the Technical Root Cause Analysis (RCA) Agent. "
-                            "Examine stack traces, code diffs, and telemetry logs. "
-                            "Identify the exact root cause, offending commit hash/author if present, "
-                            "impacted microservices, and extract 1-2 supporting log quotes."
+                            "Examine stack traces, code diffs, and telemetry logs provided in the evidence.\n"
+                            "CRITICAL TRUTHFULNESS & GROUNDING RULES:\n"
+                            "1. Analyze ONLY the provided evidence logs. GROUND YOUR ANALYSIS STRICTLY IN THE PROVIDED EVIDENCE.\n"
+                            "2. DO NOT fabricate, invent, or hallucinate commit hashes, commit authors, stack traces, or error signatures if they are not explicitly present in the provided evidence logs.\n"
+                            "3. If NO code commit (GitHub commit hash/author) is explicitly present in the evidence logs, set `offending_commit = null`.\n"
+                            "4. If NO error stack trace or exception code exists in the evidence logs, set `error_fingerprints` to an empty list [].\n"
+                            "5. Extract 1-2 exact supporting quotes or text excerpts from the evidence."
                         ),
                     },
                     {"role": "user", "content": prompt},
@@ -159,9 +163,12 @@ class MultiAgentOrchestrator:
                     {
                         "role": "system",
                         "content": (
-                            "You are the Business Impact & Financial SLA Risk Assessment Agent. "
-                            "Evaluate financial downtime cost per hour, SLA breach status, "
-                            "impacted customer account tiers, and internal team blast radius."
+                            "You are the Business Impact & Financial SLA Risk Assessment Agent.\n"
+                            "CRITICAL TRUTHFULNESS & GROUNDING RULES:\n"
+                            "1. Analyze ONLY the provided evidence logs and severity.\n"
+                            "2. DO NOT invent arbitrary financial downtime costs or fictitious customer account numbers if not supported by the evidence.\n"
+                            "3. For user inquiry messages or non-outage Slack messages with no financial impact mentioned, set `estimated_downtime_cost_per_hour = 0.0`, `financial_risk_level = 'LOW'`, and `sla_breach_status = 'NOMINAL'`.\n"
+                            "4. If customer account tiers are not specified in evidence, set `affected_customer_tiers` to an empty list []."
                         ),
                     },
                     {"role": "user", "content": prompt},
@@ -186,7 +193,7 @@ class MultiAgentOrchestrator:
         prompt = (
             f"Investigation Title: {title}\n"
             f"Technical Root Cause: {rca.root_cause_summary}\n"
-            f"Offending Commit: {rca.offending_commit.hash if rca.offending_commit else 'N/A'}\n"
+            f"Offending Commit: {rca.offending_commit.hash if rca.offending_commit and rca.offending_commit.hash else 'N/A (No commit recorded)'}\n"
             f"Financial Risk Exposure: ${impact.estimated_downtime_cost_per_hour:,.2f}/hr\n"
             f"SLA Status: {impact.sla_breach_status}\n"
             f"Impacted Services: {', '.join(rca.impacted_services)}\n"
@@ -199,9 +206,11 @@ class MultiAgentOrchestrator:
                     {
                         "role": "system",
                         "content": (
-                            "You are the Remediation & Hotfix Agent. "
-                            "Formulate step-by-step hotfix instructions, exact git rollback command, "
-                            "a shell verification script, and a concise Jira ticket summary."
+                            "You are the Remediation & Hotfix Agent.\n"
+                            "CRITICAL TRUTHFULNESS & GROUNDING RULES:\n"
+                            "1. Formulate step-by-step mitigation instructions based strictly on the RCA findings.\n"
+                            "2. If `offending_commit` is null or N/A (no commit hash exists in evidence), set `git_rollback_command = 'N/A - No offending commit hash identified in evidence stream'`.\n"
+                            "3. DO NOT invent fake commit hashes or fake git revert commands for non-existent code commits!"
                         ),
                     },
                     {"role": "user", "content": prompt},
@@ -227,41 +236,72 @@ class MultiAgentOrchestrator:
 
     # --- Fallback Generators for Safe Resilience ---
     def _fallback_rca(self, title: str, evidence: list[dict[str, Any]]) -> TechnicalRCAResult:
+        # Check if any evidence item is from GitHub/code commit
+        github_ev = next((ev for ev in evidence if ev.get("type") in ["github", "push", "pull_request"]), None)
+        
+        offending_commit = None
+        if github_ev:
+            meta = github_ev.get("metadata", {})
+            commit_hash = meta.get("commit_hash") or meta.get("hash") or "HEAD~1"
+            offending_commit = OffendingCommitInfo(
+                hash=commit_hash,
+                author=github_ev.get("author_name", "Developer"),
+                message=github_ev.get("summary", "Code push"),
+                diff_summary=meta.get("diff_summary", "Updated code modules")
+            )
+
+        quotes = []
+        for ev in evidence[:2]:
+            quotes.append(EvidenceQuote(
+                platform=ev.get("type", "telemetry"),
+                quote=ev.get("summary", "Reported anomaly"),
+                source_url=ev.get("source_url")
+            ))
+
         return TechnicalRCAResult(
-            root_cause_summary=f"Automated heuristic analysis detected anomalous telemetry in {title}.",
-            offending_commit=OffendingCommitInfo(
-                hash="HEAD~1", author="Engineering On-Call", message="Recent deployment", diff_summary="Core service updates"
-            ),
-            impacted_services=["API Gateway", "Auth Service"],
-            error_fingerprints=["HTTP_500_INTERNAL_SERVER_ERROR", "DB_CONNECTION_TIMEOUT"],
-            evidence_quotes=[
-                EvidenceQuote(platform=ev.get("type", "telemetry"), quote=ev.get("summary", "Anomalous signal"), source_url=ev.get("source_url"))
-                for ev in evidence[:2]
-            ]
+            root_cause_summary=f"Analysis of reported telemetry signal for '{title}'.",
+            offending_commit=offending_commit,
+            impacted_services=["Deployment Service"] if "department" in title.lower() or "deployment" in title.lower() else ["General System"],
+            error_fingerprints=[],
+            evidence_quotes=quotes
         )
 
     def _fallback_business_impact(self, severity: str) -> BusinessImpactResult:
-        is_high = severity.lower() in ["critical", "high"]
+        is_critical = severity.lower() == "critical"
+        is_high = severity.lower() == "high"
+        
+        cost = 15000.0 if is_critical else (5000.0 if is_high else 0.0)
+        risk_level = "CRITICAL" if is_critical else ("HIGH" if is_high else "MEDIUM" if severity.lower() == "medium" else "LOW")
+        sla_status = "IMMINENT_RISK" if is_critical else ("AT_RISK" if is_high else "NOMINAL")
+
         return BusinessImpactResult(
-            financial_risk_level="CRITICAL" if is_high else "MEDIUM",
-            estimated_downtime_cost_per_hour=15000.0 if is_high else 2500.0,
-            sla_breach_status="IMMINENT_RISK" if is_high else "NOMINAL",
-            affected_customer_tiers=[
-                CustomerImpactTier(tier="Enterprise Tier 1", account_count=3, impact_summary="Increased API latency on checkout endpoints")
-            ],
-            cross_functional_blast_radius=["Payments Core", "Customer Operations"]
+            financial_risk_level=risk_level,
+            estimated_downtime_cost_per_hour=cost,
+            sla_breach_status=sla_status,
+            affected_customer_tiers=[],
+            cross_functional_blast_radius=["Platform Operations"]
         )
 
     def _fallback_remediation(self, rca: TechnicalRCAResult) -> RemediationPlanResult:
-        commit_hash = rca.offending_commit.hash if rca.offending_commit and rca.offending_commit.hash else "HEAD"
+        commit_hash = rca.offending_commit.hash if (rca.offending_commit and rca.offending_commit.hash) else None
+        
+        if commit_hash and not commit_hash.startswith("N/A"):
+            rollback_cmd = f"git revert {commit_hash} --no-edit && git push origin main"
+            mitigation = [
+                f"1. Revert offending commit {commit_hash}.",
+                "2. Verify service deployment health."
+            ]
+        else:
+            rollback_cmd = "N/A - No offending commit hash identified in evidence stream"
+            mitigation = [
+                "1. Review evidence telemetry logs.",
+                "2. Coordinate with service owners to investigate reported deployment issues.",
+                "3. Monitor service health metrics."
+            ]
+
         return RemediationPlanResult(
-            immediate_mitigation_steps=[
-                "1. Isolate the affected upstream gateway instance.",
-                "2. Execute git revert on the offending commit.",
-                "3. Verify database connection pool health.",
-                "4. Notify customer success leads."
-            ],
-            git_rollback_command=f"git revert {commit_hash} --no-edit && git push origin main",
+            immediate_mitigation_steps=mitigation,
+            git_rollback_command=rollback_cmd,
             verification_script="curl -s -f http://localhost:8000/health || exit 1",
-            jira_escalation_summary=f"[HOTFIX REQUIRED] {rca.root_cause_summary}"
+            jira_escalation_summary=f"[INVESTIGATION] {rca.root_cause_summary}"
         )
