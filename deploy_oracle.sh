@@ -32,11 +32,16 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates 
 sudo systemctl enable --now docker
 sudo usermod -aG docker $USER || true
 
-# 4. Clone or pull repo
+# 4. Clone or pull repo (ensure directory is entered)
 echo "📥 [4/5] Checking out repository..."
 if [ ! -d "operational-intelligence-platform" ] && [ ! -f "docker-compose.yml" ]; then
     git clone https://github.com/adhish1478/operational-intelligence-platform.git
     cd operational-intelligence-platform
+else
+    if [ -d "operational-intelligence-platform" ]; then
+        cd operational-intelligence-platform
+        git pull origin main
+    fi
 fi
 
 # 5. Create backend/.env if missing
