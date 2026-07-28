@@ -2,7 +2,7 @@ from app.organizations.models import Organization
 from sqlalchemy.orm.dependency import ManyToOneDP
 import uuid
 from datetime import datetime
-from sqlalchemy import String, ForeignKey, DateTime, Text, func
+from sqlalchemy import String, ForeignKey, DateTime, Text, JSON, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
@@ -47,6 +47,13 @@ class Diagnosis(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     report_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Multi-Agent Structured Diagnosis Data
+    technical_rca: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    business_impact: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    remediation_plan: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    orchestration_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

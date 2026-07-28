@@ -9,6 +9,7 @@ class InvestigationBase(BaseModel):
     severity : Literal['critical','high','medium','low'] = Field('medium')
     status: Literal["open", "investigating", "resolved", "closed"] = Field("open")
     assigned_to_id: uuid.UUID | None = Field(None)
+    suggested_action: str | None = Field(None)
     suggestion_action : str | None = Field(None)
 
 class InvestigationCreate(InvestigationBase):
@@ -20,12 +21,15 @@ class InvestigationUpdate(BaseModel):
     severity: Literal['critical','high','medium','low'] | None= Field(None)
     status: Literal['open', 'investigating', 'resolved', 'closed'] | None= Field(None)
     assigned_to_id: uuid.UUID | None = Field(None)
+    suggested_action: str | None = Field(None)
     suggestion_action : str | None = Field(None)
     
 class InvestigationRead(InvestigationBase):
     id: uuid.UUID
     organization_id: uuid.UUID
-    detected_at: datetime
+    detected_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = {
         'from_attributes': True
@@ -37,6 +41,10 @@ class DiagnosisRead(BaseModel):
     investigation_id: uuid.UUID
     triggered_by_id: uuid.UUID | None
     report_summary: str
+    technical_rca: dict | None = None
+    business_impact: dict | None = None
+    remediation_plan: dict | None = None
+    orchestration_metadata: dict | None = None
     created_at: datetime
 
     model_config = {

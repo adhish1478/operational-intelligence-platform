@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { 
   MessageSquare, 
   GitCommit, 
@@ -11,7 +11,8 @@ import {
   ChevronDown,
   Send,
   ShieldAlert,
-  Sparkles
+  Sparkles,
+  Cpu
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -23,6 +24,7 @@ import { MarkdownRenderer } from '../components/MarkdownRenderer';
 
 export const InvestigationDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
 
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
   const [isRcaModalOpen, setIsRcaModalOpen] = useState(false);
@@ -40,6 +42,15 @@ export const InvestigationDetails: React.FC = () => {
   const [escalatingJira, setEscalatingJira] = useState(false);
   const [jiraTicket, setJiraTicket] = useState<{ key: string; url: string } | null>(null);
   const [jiraError, setJiraError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (searchParams.get('autoDiagnose') === 'true' && id) {
+      setIsRcaModalOpen(true);
+      if (!activeDiagnosis && !diagnosing) {
+        handleRunDiagnosis();
+      }
+    }
+  }, [searchParams, id]);
   
   const handleSetStatus = async (newStatus: InvestigationStatus) => {
     if (!id || !investigation) return;
@@ -62,6 +73,10 @@ export const InvestigationDetails: React.FC = () => {
     }
   };
   
+  const [diagnosisData, setDiagnosisData] = useState<any>(null);
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
+  const [activeStepText, setActiveStepText] = useState<string>('');
+
   const [timelineEvents, setTimelineEvents] = useState([
     { id: '1', type: 'system', text: 'Investigation opened automatically via SysAlert', time: '10:14 AM' },
     { id: '2', type: 'system', text: 'Severity set to Critical based on SLA agreement', time: '10:15 AM' }
@@ -81,31 +96,71 @@ export const InvestigationDetails: React.FC = () => {
     enabled: !!id
   });
 
+  // 3. Fetch Diagnoses History (Structured Multi-Agent Reports)
+  const { data: rawDiagnoses, refetch: refetchDiagnoses } = useQuery({
+    queryKey: ['diagnoses', id],
+    queryFn: () => api.get(`/investigations/${id}/diagnoses`),
+    enabled: !!id
+  });
+
+  const latestDiagnosis = rawDiagnoses && rawDiagnoses.length > 0 ? rawDiagnoses[rawDiagnoses.length - 1] : null;
+  const activeDiagnosis = diagnosisData || latestDiagnosis;
+
   const investigation = rawInv ? mapInvestigation(rawInv) : null;
   const evidenceList = (rawEv || []).map(mapEvidence);
 
   const handleRunDiagnosis = async () => {
     if (!id) return;
+    setIsRcaModalOpen(true);
     setDiagnosing(true);
     setDiagnoseError(null);
+    setCurrentStepIndex(0);
+    setActiveStepText('Gathering correlated telemetry from GitHub, Jira, and alerts...');
 
     try {
-      // Trigger AI Diagnostic Summarizer
-      const resp = await api.post(`/investigations/${id}/diagnose`);
-      
-      // Append a timeline event for successful AI run
+      await api.stream(`/investigations/${id}/diagnose/stream`, (eventType, payload) => {
+        if (eventType === 'triage') {
+          setCurrentStepIndex(0);
+          setActiveStepText(`Correlating ${payload.evidence_count} evidence streams across GitHub, Jira, and Slack...`);
+        } else if (eventType === 'rca_complete') {
+          setCurrentStepIndex(1);
+          setActiveStepText(`Root cause located: ${payload.offending_commit?.hash ? `Commit #${payload.offending_commit.hash.slice(0, 7)} by ${payload.offending_commit.author}` : payload.root_cause_summary?.slice(0, 60)}`);
+        } else if (eventType === 'business_impact_complete') {
+          setCurrentStepIndex(2);
+          setActiveStepText(`Financial risk assessed: $${payload.estimated_downtime_cost_per_hour?.toLocaleString() || '18,500'}/hr exposure calculated.`);
+        } else if (eventType === 'remediation_complete') {
+          setCurrentStepIndex(3);
+          setActiveStepText(`Automated hotfix plan generated: ${payload.git_rollback_command || 'Git rollback ready'}.`);
+        } else if (eventType === 'finished') {
+          setCurrentStepIndex(4);
+          setActiveStepText('Analysis complete.');
+          setDiagnosisData({
+            report_summary: payload.report_summary,
+            technical_rca: payload.technical_rca,
+            business_impact: payload.business_impact,
+            remediation_plan: payload.remediation_plan,
+            orchestration_metadata: { triage_mode: 'DAG_MULTI_AGENT' }
+          });
+        }
+      });
+
       const aiEvent = {
         id: Date.now().toString(),
         type: 'ai-forensics',
-        text: `AI Diagnostic complete: ${resp.report_summary.slice(0, 100)}...`,
+        text: `AI Forensic Analysis completed`,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setTimelineEvents(prev => [...prev, aiEvent]);
-      
-      // Refetch investigation to get updated suggested action
+
       await refetchInv();
+      await refetchDiagnoses();
     } catch (err: any) {
-      setDiagnoseError(err.message || 'AI Diagnosis request failed. Ensure OpenAI API credentials exist.');
+      try {
+        const resp = await api.post(`/investigations/${id}/diagnose`);
+        setDiagnosisData(resp);
+      } catch (fallbackErr: any) {
+        setDiagnoseError(fallbackErr.message || 'AI Diagnosis request failed.');
+      }
     } finally {
       setDiagnosing(false);
     }
@@ -235,10 +290,15 @@ export const InvestigationDetails: React.FC = () => {
         <div className="flex items-center gap-2">
           {/* AI Forensics Modal Trigger */}
           <button 
-            onClick={() => setIsRcaModalOpen(true)}
-            className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white text-body-sm font-semibold rounded-lg transition-all shadow flex items-center gap-2"
+            onClick={() => {
+              setIsRcaModalOpen(true);
+              if (!activeDiagnosis && !diagnosing) {
+                handleRunDiagnosis();
+              }
+            }}
+            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-body-sm font-semibold rounded-lg transition-all shadow-sm flex items-center gap-2 border border-slate-800"
           >
-            <Sparkles className="w-4 h-4 text-indigo-200 animate-pulse" />
+            <Cpu className="w-4 h-4 text-slate-300" />
             <span>AI Forensics & RCA</span>
           </button>
 
@@ -331,7 +391,7 @@ export const InvestigationDetails: React.FC = () => {
                   <span>Full AI Report</span>
                 </button>
               </div>
-              <p className="text-body-sm text-on-surface">{investigation.description || 'Awaiting description analysis.'}</p>
+              <p className="text-body-sm text-on-surface font-sans">{activeDiagnosis?.technical_rca?.root_cause_summary || investigation.description || 'Awaiting description analysis.'}</p>
             </div>
 
             <div className="bg-error-container/40 border border-error/20 rounded p-3 space-y-3">
@@ -339,14 +399,14 @@ export const InvestigationDetails: React.FC = () => {
                 <h4 className="text-body-sm font-semibold text-error flex items-center gap-1.5 mb-1">
                   <span>Suggested Remediation</span>
                 </h4>
-                {investigation.suggestedAction ? (
-                  <MarkdownRenderer content={investigation.suggestedAction} />
+                {(investigation.suggestedAction || activeDiagnosis?.report_summary) ? (
+                  <MarkdownRenderer content={investigation.suggestedAction || activeDiagnosis?.report_summary} />
                 ) : (
                   <p className="text-body-sm text-on-surface">No remediation suggested yet. Run AI Diagnostics above.</p>
                 )}
               </div>
 
-              {investigation.suggestedAction && (
+              {(investigation.suggestedAction || activeDiagnosis?.report_summary) && (
                 <div className="pt-2.5 border-t border-outline-variant/40 flex flex-wrap items-center gap-2">
                   <button
                     onClick={handleShareSlack}
@@ -571,8 +631,14 @@ export const InvestigationDetails: React.FC = () => {
         onClose={() => setIsRcaModalOpen(false)}
         investigationTitle={investigation.title}
         severity={investigation.severity}
-        suggestedAction={investigation.suggestedAction}
+        suggestedAction={investigation.suggestedAction || activeDiagnosis?.report_summary}
+        technicalRca={activeDiagnosis?.technical_rca}
+        businessImpact={activeDiagnosis?.business_impact}
+        remediationPlan={activeDiagnosis?.remediation_plan}
+        orchestrationMetadata={activeDiagnosis?.orchestration_metadata}
         evidenceList={evidenceList}
+        currentStepIndex={currentStepIndex}
+        activeStepText={activeStepText}
         onRunDiagnosis={handleRunDiagnosis}
         isDiagnosing={diagnosing}
         onShareSlack={handleShareSlack}

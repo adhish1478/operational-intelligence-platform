@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # Core Settings
     PROJECT_NAME: str = "Operational Intelligence Platform"
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+    ENVIRONMENT: Literal["development", "staging", "production", "testing"] = "development"
     SECRET_KEY: str
     OPENAI_API_KEY: str | None = None
 

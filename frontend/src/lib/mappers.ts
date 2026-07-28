@@ -10,7 +10,7 @@ export const mapInvestigation = (inv: any): OperationalInvestigation => {
     category: 'security',
     sourceSystems: ['slack', 'github'],
     detectedAt: inv.detected_at || new Date().toISOString(),
-    suggestedAction: inv.suggestion_action || '',
+    suggestedAction: inv.suggested_action || inv.suggestion_action || '',
     evidence: [],
     entities: []
   };
