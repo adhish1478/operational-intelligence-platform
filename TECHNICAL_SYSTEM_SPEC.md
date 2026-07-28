@@ -617,3 +617,60 @@ The Jira correlation engine has been fully implemented across all **3 planned ph
 * **Human Triage Feedback Loop**: Learning correlation weights dynamically based on operator actions (e.g. manually moving or splitting evidence items across investigations).
 * **Cross-Platform Correlation Intelligence**: ✅ Implemented via Step 3.75 (`correlate_cross_platform_keys`).
 * **Dynamic Jira Project List in UI**: Replace manual text input for tracked projects with dynamic project list fetched from Jira REST API (matching GitHub/Slack UI pattern).
+
+---
+
+## 🧠 13. DAG Multi-Agent Forensics & Anti-Hallucination Engine
+
+The platform includes an automated multi-agent diagnosis engine executed as a Directed Acyclic Graph (DAG) using OpenAI GPT-4o structured outputs:
+
+```mermaid
+graph TD
+    A["Incoming Telemetry Signal / Trigger"] --> B["Triage & Router Agent"]
+    B -->|"Critical / High Severity"| C["Stage 1: Parallel Execution"]
+    C --> D["Technical RCA Agent (GPT-4o)"]
+    C --> E["Business Impact & Financial SLA Agent (GPT-4o)"]
+    D --> F["Stage 2: Remediation & Hotfix Agent"]
+    E --> F
+    F --> G["Unified Structured Output & SSE Stream"]
+```
+
+### Strict Grounding & Anti-Hallucination Safeguards:
+1. **GitHub Commit Verification**:
+   - If evidence stream contains code commits (PR / Push), the engine extracts the SHA and generates a valid `git revert <sha>` command.
+   - If **no code commits exist** in the evidence stream, `offending_commit` is strictly set to `null`, `error_fingerprints` to `[]`, and `git_rollback_command` to `"N/A - No offending commit hash identified in evidence stream"`.
+2. **Post-Parse Enforcements**:
+   - Python-level validation overrides any LLM attempted hallucination before persisting to PostgreSQL / MongoDB or streaming via Server-Sent Events (SSE).
+3. **Live Streaming**:
+   - Endpoint `/api/v1/investigations/{id}/diagnose/stream` provides real-time SSE progress updates to the frontend SPA.
+
+---
+
+## ☁️ 14. Production Infrastructure, Cloud Topology & Oracle Free Tier Deployment
+
+### 14.1 Oracle Cloud Infrastructure (OCI) Always Free Hardware
+- **Shape**: `VM.Standard.A1.Flex` (Ampere Altra ARM64 CPU)
+- **Allocation**: 4 OCPUs, 24 GB RAM, 150 GB Block Storage
+- **Operating System**: Ubuntu 22.04 LTS (ARM64)
+
+### 14.2 Container Topology (9 Microservices)
+| Service Name | Container Name | Internal Port | Host Port | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| `frontend` | `oip_frontend` | 80 | `5173` | React SPA served via Nginx |
+| `backend` | `oip_backend` | 8000 | `8000` | FastAPI REST & SSE API Engine |
+| `worker` | `oip_worker` | N/A | N/A | Async Telemetry & Ingestion Worker |
+| `db` | `oip_db` | 5432 | `5433` | PostgreSQL 16 Relational Storage |
+| `mongodb` | `oip_mongodb` | 27017 | `27017` | MongoDB 7 Document Evidence Store |
+| `rabbitmq` | `oip_rabbitmq` | 5672, 15672 | `5672`, `15672` | Message Broker & AMQP Management |
+| `nginx` | `oip_nginx` | 80, 443 | `80`, `443` | Ingress Reverse Proxy & SSL Router |
+| `prometheus` | `oip_prometheus` | 9090 | `9090` | System Metric Scraper |
+| `grafana` | `oip_grafana` | 3000 | `3000` | Operational Monitoring Dashboard |
+
+### 14.3 Domain, SSL & Decoupled Frontend Hosting
+- **Backend Domain**: DuckDNS Dynamic DNS (`adhish-oip.duckdns.org` ➔ `129.159.227.108`).
+- **SSL Certificates**: Let's Encrypt / Certbot standalone validation mounted to `/etc/nginx/certs` on port 443.
+- **Frontend Hosting (Vercel)**:
+  - Root directory set to `frontend/`.
+  - Environmental variable `VITE_API_URL=https://adhish-oip.duckdns.org` baked into Vite static bundle.
+  - Cross-Origin Resource Sharing (CORS) and HTTPS alignment configured for secure production API calls.
+
