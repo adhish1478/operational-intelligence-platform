@@ -109,12 +109,19 @@ class MultiAgentOrchestrator:
         if not self.client:
             return self._fallback_rca(title, evidence)
 
+        has_github_evidence = any(
+            ev.get("type") in ["github", "push", "pull_request"] or "commit_hash" in ev.get("metadata", {})
+            for ev in evidence
+        )
+
         timeline_str = self._format_evidence_timeline(evidence)
         prompt = (
             f"Investigation Title: {title}\n"
             f"Description: {description}\n\n"
             f"Technical Telemetry & Code Evidence:\n{timeline_str}\n"
         )
+        if not has_github_evidence:
+            prompt += "\nNOTE: There are NO code commits in the evidence stream. You MUST set offending_commit = null."
 
         try:
             completion = await self.client.beta.chat.completions.parse(
@@ -138,7 +145,10 @@ class MultiAgentOrchestrator:
                 response_format=TechnicalRCAResult,
                 temperature=0.1,
             )
-            return completion.choices[0].message.parsed
+            parsed = completion.choices[0].message.parsed
+            if not has_github_evidence:
+                parsed.offending_commit = None
+            return parsed
         except Exception as e:
             logger.error(f"Technical RCA Agent failed: {e}", exc_info=True)
             return self._fallback_rca(title, evidence)
@@ -190,14 +200,18 @@ class MultiAgentOrchestrator:
         if not self.client:
             return self._fallback_remediation(rca)
 
+        has_commit = bool(rca.offending_commit and rca.offending_commit.hash and not rca.offending_commit.hash.startswith("N/A"))
+
         prompt = (
             f"Investigation Title: {title}\n"
             f"Technical Root Cause: {rca.root_cause_summary}\n"
-            f"Offending Commit: {rca.offending_commit.hash if rca.offending_commit and rca.offending_commit.hash else 'N/A (No commit recorded)'}\n"
+            f"Offending Commit: {rca.offending_commit.hash if has_commit else 'N/A (No commit recorded)'}\n"
             f"Financial Risk Exposure: ${impact.estimated_downtime_cost_per_hour:,.2f}/hr\n"
             f"SLA Status: {impact.sla_breach_status}\n"
             f"Impacted Services: {', '.join(rca.impacted_services)}\n"
         )
+        if not has_commit:
+            prompt += "\nNOTE: There is NO offending commit hash. Set git_rollback_command = 'N/A - No offending commit hash identified in evidence stream'."
 
         try:
             completion = await self.client.beta.chat.completions.parse(
@@ -218,7 +232,10 @@ class MultiAgentOrchestrator:
                 response_format=RemediationPlanResult,
                 temperature=0.1,
             )
-            return completion.choices[0].message.parsed
+            parsed = completion.choices[0].message.parsed
+            if not has_commit:
+                parsed.git_rollback_command = "N/A - No offending commit hash identified in evidence stream"
+            return parsed
         except Exception as e:
             logger.error(f"Remediation Agent failed: {e}", exc_info=True)
             return self._fallback_remediation(rca)
