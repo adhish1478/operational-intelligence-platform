@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -e
 
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
 echo "=========================================================================="
 echo "🚀 Operational Intelligence Platform — Oracle Cloud Deployer"
 echo "=========================================================================="
 
-# 1. Update system packages
+# 1. Update system packages non-interactively
 echo "📦 [1/5] Updating system packages..."
-sudo apt update && sudo apt upgrade -y
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get upgrade -y -o Dpkg::Options::="--force-confold"
 
 # 2. Configure Ubuntu iptables firewall
 echo "🔓 [2/5] Opening firewall ports (80, 443, 3000, 15672)..."
@@ -19,12 +23,12 @@ sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 15672 -j ACCEPT
 # Persist rules
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo debconf-set-selections
 echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | sudo debconf-set-selections
-sudo apt install -y iptables-persistent
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
 sudo netfilter-persistent save
 
 # 3. Install Docker & Docker Compose
 echo "🐳 [3/5] Installing Docker & Docker Compose..."
-sudo apt install -y git curl ca-certificates gnupg lsb-release docker.io docker-compose-v2
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates gnupg lsb-release docker.io docker-compose-v2
 sudo systemctl enable --now docker
 sudo usermod -aG docker $USER || true
 
