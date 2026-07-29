@@ -669,7 +669,7 @@ graph TD
 ### 14.3 Domain, SSL & Decoupled Frontend Hosting
 - **Backend Domain**: DuckDNS Dynamic DNS (`adhish-oip.duckdns.org` ➔ `129.159.227.108`).
 - **SSL Certificates**: Let's Encrypt / Certbot standalone validation mounted to `/etc/nginx/certs` on port 443.
-- **Frontend Hosting (Vercel)**:
+- **Frontend Production URL**: [https://sigint-ai.vercel.app/](https://sigint-ai.vercel.app/) (Hosted on Vercel)
   - Root directory set to `frontend/`.
   - Environmental variable `VITE_API_URL=https://adhish-oip.duckdns.org` baked into Vite static bundle.
   - Cross-Origin Resource Sharing (CORS) and HTTPS alignment configured for secure production API calls.

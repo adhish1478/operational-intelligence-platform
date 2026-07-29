@@ -119,6 +119,13 @@ The system will start:
 
 ---
 
+## 🌐 Live Production Deployment
+
+- **Live Web Application**: [https://sigint-ai.vercel.app/](https://sigint-ai.vercel.app/)
+- **Live API Endpoint**: `https://adhish-oip.duckdns.org/api/v1`
+
+---
+
 ## 🧪 Testing Suite
 
 Execute the automated backend test suite inside the running backend container:
