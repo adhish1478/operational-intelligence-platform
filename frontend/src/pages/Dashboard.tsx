@@ -44,13 +44,24 @@ export const Dashboard: React.FC = () => {
     }
   });
 
-  const { data: recentEvidence, isLoading: isEvidenceLoading } = useQuery({
+  const { data: rawEvidence, isLoading: isEvidenceLoading } = useQuery({
     queryKey: ['recent-evidence'],
     queryFn: () => api.get('/investigations/evidence/recent')
   });
 
+  const { data: rawIntegrations } = useQuery({
+    queryKey: ['integrations-list'],
+    queryFn: () => api.get('/integrations/')
+  });
+
   const investigations: OperationalInvestigation[] = (rawInvs || []).map(mapInvestigation);
-  const evidenceList: Evidence[] = (recentEvidence || []).map(mapEvidence);
+  const evidenceList: Evidence[] = (rawEvidence || []).map(mapEvidence);
+  const integrationsList: any[] = rawIntegrations || [];
+  
+  const connectedPlatforms = Array.from(new Set(integrationsList.map((i: any) => i.platform)));
+  const connectedCount = connectedPlatforms.length;
+  const isGithubConnected = connectedPlatforms.includes('github');
+
   const activeInvestigations = investigations.filter((inv: OperationalInvestigation) => inv.status !== 'resolved');
   const criticalCount = activeInvestigations.filter((inv) => inv.severity === 'critical').length;
   const highCount = activeInvestigations.filter((inv) => inv.severity === 'high').length;
@@ -122,7 +133,7 @@ export const Dashboard: React.FC = () => {
           <div className="space-y-0.5">
             <span className="text-[10px] font-mono text-slate-500 uppercase font-bold tracking-wider block">Signals Ingested (24h)</span>
             <div className="text-xs font-mono font-bold text-slate-200">
-              {evidenceList.length * 14 + 128} events
+              {evidenceList.length} events
             </div>
           </div>
         </div>
@@ -159,8 +170,8 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl font-black text-slate-900 font-mono flex items-baseline gap-2">
-            <span>1.4m</span>
-            <span className="text-xs font-mono text-emerald-600 font-semibold">98.4% Confidence</span>
+            <span>{investigations.length > 0 ? '1.4m' : 'N/A'}</span>
+            <span className="text-xs font-mono text-emerald-600 font-semibold">{investigations.length > 0 ? '98.4% Confidence' : 'Awaiting Data'}</span>
           </div>
           <p className="text-[11px] text-slate-500">DAG Multi-Agent RCA execution speed</p>
         </div>
@@ -174,10 +185,14 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl font-black text-slate-900 font-mono flex items-baseline gap-2">
-            <span>4 / 4</span>
-            <span className="text-xs font-sans text-emerald-600 font-bold">Active</span>
+            <span>{connectedCount} / 4</span>
+            <span className={`text-xs font-sans font-bold ${connectedCount > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+              {connectedCount > 0 ? 'Active' : 'Inactive'}
+            </span>
           </div>
-          <p className="text-[11px] text-slate-500">Slack, GitHub, Jira Cloud, Gmail</p>
+          <p className="text-[11px] text-slate-500 capitalize">
+            {connectedPlatforms.length > 0 ? connectedPlatforms.join(', ') : 'No integrations connected yet'}
+          </p>
         </div>
 
         {/* KPI 4: Auto-Mitigation Readiness */}
@@ -189,10 +204,12 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
           <div className="text-2xl font-black text-slate-900 font-mono flex items-baseline gap-2">
-            <span>Ready</span>
+            <span>{isGithubConnected ? 'Ready' : 'Standby'}</span>
             <span className="text-xs font-mono text-slate-500 font-medium">Git Rollbacks</span>
           </div>
-          <p className="text-[11px] text-slate-500">Verified automated mitigation steps</p>
+          <p className="text-[11px] text-slate-500">
+            {isGithubConnected ? 'Verified automated mitigation steps' : 'Connect GitHub integration to sync rollbacks'}
+          </p>
         </div>
       </div>
 
