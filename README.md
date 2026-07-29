@@ -57,7 +57,7 @@ The **Operational Intelligence Platform (Sigint AI)** is an enterprise signal pr
                          │
                          ▼
         ┌───────────────────────────────────┐
-        │    Celery Telemetry Workers       │
+        │   RabbitMQ Asyncio Workers        │
         │ • Vector Embedding Generation     │
         │ • Multi-Phase Correlation Engine  │
         └───────┬───────────────────┬───────┘
