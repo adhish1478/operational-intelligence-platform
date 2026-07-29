@@ -674,3 +674,36 @@ graph TD
   - Environmental variable `VITE_API_URL=https://adhish-oip.duckdns.org` baked into Vite static bundle.
   - Cross-Origin Resource Sharing (CORS) and HTTPS alignment configured for secure production API calls.
 
+---
+
+## 🎨 15. Frontend User Experience & UI Specifications
+
+The platform UI is designed following modern high-density operational aesthetics (Linear, Datadog, Palantir Foundry):
+
+### 15.1 Core Views & Components
+1. **Executive Command Center / Attention Deck (`Dashboard.tsx`)**:
+   - High-density KPI cards: Active Critical Exposure ($/hr), MTTD, Connected Signals, and Hotfix Sync status.
+   - Live Incident Attention Queue with instant auto-diagnose action buttons (`?autoDiagnose=true`).
+   - Real-time live signal stream panel displaying cross-platform evidence events as they are ingested.
+
+2. **Issue Details & AI Forensics Workspace (`InvestigationDetails.tsx`)**:
+   - 4-Pane Forensic Layout: Diagnostic Summary, Live Diagnostic Logs, Multi-Platform Evidence Feed, and Linked Entities.
+   - **Integration Action Deep Links**: Direct, branded external action buttons (**"Open Slack Thread"**, **"Open Jira Ticket"**, **"Open GitHub PR"**).
+   - **Timeline Brand Badges**: Distinct official brand badges for evidence sources (`Slack` `#4A154B`, `GitHub` `#0F172A`, `Jira` `#0052CC`, `Gmail` `#EA4335`).
+
+3. **Investigations Triage Queue (`InvestigationsQueue.tsx`)**:
+   - High-density triage table with rich status, severity, and entity badges.
+   - Table columns include: `ID`, `Investigation Title`, `Owner` (`Unassigned` / Operator), `Created` timestamp, `Exposure` ($/hr impact badge), `Severity`, `Status`, and `Actions`.
+
+4. **Operational Reports Reader (`Reports.tsx`)**:
+   - Live SLA weekly metrics summary dashboard.
+   - **Interactive Report Reader Modal**: Clicking any report card opens a full-screen report viewer displaying executive summaries, impact breakdowns, post-mortem policy recommendations, and direct **Export PDF/Text** features.
+
+5. **System Integrations Connector Hub (`Integrations.tsx`)**:
+   - Displays real-time status indicators for Slack, GitHub, Jira, and Gmail.
+   - Expandable configuration drawers for multi-channel Slack tracking, multi-repository GitHub monitoring, multi-project Jira tracking, and Gmail signal rules.
+
+6. **Custom Brand Identity**:
+   - Flat geometric hexagon brand mark emblem (`favicon.jpg` / `favicon.png`) integrated in Nginx and HTML headers.
+
+
