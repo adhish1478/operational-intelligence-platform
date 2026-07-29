@@ -1,11 +1,12 @@
-import React from 'react';
-import { FileBarChart, Download, AlertCircle, ShieldAlert, Award } from 'lucide-react';
+import React, { useState } from 'react';
+import { FileBarChart, Download, AlertCircle, ShieldAlert, Award, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { mapInvestigation } from '../lib/mappers';
 import type { OperationalInvestigation } from '../types';
 
 export const Reports: React.FC = () => {
+  const [selectedReport, setSelectedReport] = useState<any | null>(null);
   // Fetch Live SLA Metrics from API
   const { data: digest, isLoading: isDigestLoading } = useQuery({
     queryKey: ['reports-digest'],
@@ -148,25 +149,29 @@ Service Assistant Operational Intelligence Platform
       {/* Reports Grid List */}
       <div className="space-y-4">
         {reports.map(rep => (
-          <div key={rep.id} className="bg-surface border border-outline-variant rounded-lg p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 hover:border-outline transition-colors">
+          <div 
+            key={rep.id} 
+            onClick={() => setSelectedReport(rep)}
+            className="bg-surface border border-outline-variant rounded-lg p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 hover:border-slate-400 hover:shadow-sm transition-all cursor-pointer group"
+          >
             
             <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded bg-surface-low border border-outline-variant flex items-center justify-center text-secondary shrink-0">
-                <FileBarChart className="w-5.5 h-5.5" />
+              <div className="w-10 h-10 rounded bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-800 shrink-0 group-hover:bg-slate-900 group-hover:text-white transition-colors">
+                <FileBarChart className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] uppercase font-bold text-outline-variant bg-surface-container border border-outline-variant px-1.5 py-0.2 rounded font-mono">
+                  <span className="text-[10px] uppercase font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded font-mono">
                     {rep.type}
                   </span>
-                  <span className="text-mono-label text-[11px] text-outline">
+                  <span className="text-mono-label text-[11px] text-slate-500 font-semibold">
                     Generated: {rep.date}
                   </span>
                 </div>
-                <h3 className="text-headline-sm font-semibold text-on-surface hover:text-primary transition-colors cursor-pointer">
+                <h3 className="text-base font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
                   {rep.title}
                 </h3>
-                <p className="text-body-sm text-on-surface-variant mt-1.5 max-w-2xl line-clamp-2">
+                <p className="text-xs text-slate-600 mt-1.5 max-w-2xl line-clamp-2 leading-relaxed">
                   {rep.impactSummary}
                 </p>
               </div>
@@ -175,17 +180,108 @@ Service Assistant Operational Intelligence Platform
             {/* Actions */}
             <div className="flex items-center gap-2 shrink-0 w-full md:w-auto border-t md:border-t-0 border-outline-variant/40 pt-3 md:pt-0">
               <button 
-                onClick={() => handleExportPdf(rep)}
-                className="flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded border border-outline-variant hover:bg-surface-high text-body-sm font-semibold text-on-surface transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedReport(rep);
+                }}
+                className="flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold text-slate-800 transition-colors shadow-2xs"
+              >
+                <span>Read Full Report</span>
+              </button>
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleExportPdf(rep);
+                }}
+                className="flex items-center justify-center p-1.5 rounded-lg border border-slate-300 bg-slate-900 hover:bg-slate-800 text-white transition-colors shadow-2xs"
+                title="Export PDF / Text"
               >
                 <Download className="w-4 h-4" />
-                <span>Export PDF</span>
               </button>
             </div>
 
           </div>
         ))}
       </div>
+
+      {/* Interactive Report Reader Modal */}
+      {selectedReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-slate-800 text-emerald-400 font-mono text-[10px] uppercase font-bold border border-slate-700">
+                    {selectedReport.type}
+                  </span>
+                  <span className="text-xs font-mono text-slate-400">
+                    {selectedReport.date}
+                  </span>
+                </div>
+                <h3 className="text-lg font-extrabold text-slate-100">
+                  {selectedReport.title}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setSelectedReport(null)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5 text-slate-800">
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <h4 className="text-xs font-bold font-mono text-slate-500 uppercase tracking-wider">
+                  Executive Summary & Impact Breakdown
+                </h4>
+                <p className="text-sm leading-relaxed text-slate-800 font-sans">
+                  {selectedReport.impactSummary}
+                </p>
+              </div>
+
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <h4 className="text-xs font-bold font-mono text-slate-500 uppercase tracking-wider">
+                  Post-Mortem Policy & Recommendations
+                </h4>
+                <ol className="space-y-2 text-xs text-slate-700 font-sans">
+                  <li className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-start gap-2">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-900 font-mono font-bold shrink-0">1</span>
+                    <span>Conduct automated root cause validation across telemetry streams before rolling out new deployments.</span>
+                  </li>
+                  <li className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-start gap-2">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-900 font-mono font-bold shrink-0">2</span>
+                    <span>Verify database connection pool thresholds and circuit breakers on upstream microservices.</span>
+                  </li>
+                  <li className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-start gap-2">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-900 font-mono font-bold shrink-0">3</span>
+                    <span>Review escalation response SLAs with platform engineering on-call leads.</span>
+                  </li>
+                </ol>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+              <button 
+                onClick={() => setSelectedReport(null)}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-xs font-bold text-slate-700 hover:bg-white transition-colors"
+              >
+                Close Reader
+              </button>
+              <button 
+                onClick={() => handleExportPdf(selectedReport)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors shadow-sm"
+              >
+                <Download className="w-4 h-4 text-slate-300" />
+                <span>Export Report Document</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

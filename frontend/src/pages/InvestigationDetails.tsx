@@ -235,16 +235,48 @@ export const InvestigationDetails: React.FC = () => {
     }
   };
 
-  // Render icons for each evidence type
+  // Render distinct branded icons for each evidence type
   const getEvidenceIcon = (type: string) => {
-    switch (type) {
-      case 'slack': return <MessageSquare className="w-4.5 h-4.5 text-secondary shrink-0" />;
-      case 'github': return <GitCommit className="w-4.5 h-4.5 text-secondary shrink-0" />;
-      case 'jira': return <CheckCircle className="w-4.5 h-4.5 text-secondary shrink-0" />;
-      case 'email': return <Mail className="w-4.5 h-4.5 text-secondary shrink-0" />;
-      case 'gmail': return <Mail className="w-4.5 h-4.5 text-secondary shrink-0" />;
-      case 'alert': return <CheckCircle className="w-4.5 h-4.5 text-red-500 shrink-0" />;
-      default: return <FileText className="w-4.5 h-4.5 text-secondary shrink-0" />;
+    switch (type.toLowerCase()) {
+      case 'slack': 
+        return (
+          <span className="p-1 rounded bg-[#4A154B]/10 text-[#4A154B] border border-[#4A154B]/20 shrink-0" title="Slack Signal">
+            <MessageSquare className="w-3.5 h-3.5" />
+          </span>
+        );
+      case 'github': 
+      case 'push':
+      case 'pull_request':
+        return (
+          <span className="p-1 rounded bg-slate-900 text-slate-100 border border-slate-700 shrink-0" title="GitHub Signal">
+            <GitCommit className="w-3.5 h-3.5" />
+          </span>
+        );
+      case 'jira': 
+        return (
+          <span className="p-1 rounded bg-[#0052CC]/10 text-[#0052CC] border border-[#0052CC]/20 shrink-0" title="Jira Ticket Signal">
+            <CheckCircle className="w-3.5 h-3.5" />
+          </span>
+        );
+      case 'email': 
+      case 'gmail': 
+        return (
+          <span className="p-1 rounded bg-red-500/10 text-red-600 border border-red-200 shrink-0" title="Gmail Alert Signal">
+            <Mail className="w-3.5 h-3.5" />
+          </span>
+        );
+      case 'alert': 
+        return (
+          <span className="p-1 rounded bg-amber-500/10 text-amber-600 border border-amber-200 shrink-0" title="System Alert">
+            <ShieldAlert className="w-3.5 h-3.5" />
+          </span>
+        );
+      default: 
+        return (
+          <span className="p-1 rounded bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
+            <FileText className="w-3.5 h-3.5" />
+          </span>
+        );
     }
   };
 
@@ -406,43 +438,61 @@ export const InvestigationDetails: React.FC = () => {
                 )}
               </div>
 
-              {(investigation.suggestedAction || activeDiagnosis?.report_summary) && (
-                <div className="pt-2.5 border-t border-outline-variant/40 flex flex-wrap items-center gap-2">
+              <div className="pt-2.5 border-t border-outline-variant/40 space-y-2">
+                <span className="text-[10px] font-mono text-slate-500 font-bold uppercase tracking-wider block">
+                  Integration Actions
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Open / Share Slack Thread */}
                   <button
                     onClick={handleShareSlack}
                     disabled={sharingSlack || !!slackPostedChannel}
-                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded bg-[#4A154B] hover:bg-[#3b113c] text-white transition-colors disabled:opacity-60"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#4A154B] hover:bg-[#3b113c] text-white transition-all shadow-xs disabled:opacity-75"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
                     <span>
-                      {sharingSlack ? 'Sharing...' : slackPostedChannel ? `Shared to ${slackPostedChannel}` : 'Share to Slack'}
+                      {sharingSlack ? 'Sharing...' : slackPostedChannel ? `Open Slack Thread (${slackPostedChannel})` : 'Open Slack Thread'}
                     </span>
                   </button>
 
-                  <button
-                    onClick={handleEscalateJira}
-                    disabled={escalatingJira || !!jiraTicket}
-                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded bg-[#0052CC] hover:bg-[#0041a3] text-white transition-colors disabled:opacity-60"
-                  >
-                    <CheckCircle className="w-3.5 h-3.5" />
-                    <span>
-                      {escalatingJira ? 'Escalating...' : jiraTicket ? `Escalated: ${jiraTicket.key}` : 'Escalate to Jira'}
-                    </span>
-                  </button>
-
-                  {jiraTicket && (
+                  {/* Open / Escalate Jira Ticket */}
+                  {jiraTicket ? (
                     <a
                       href={jiraTicket.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex items-center gap-0.5 text-[11px] font-semibold text-primary hover:underline ml-1"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#0052CC] hover:bg-[#0041a3] text-white transition-all shadow-xs"
                     >
-                      <span>View Ticket</span>
-                      <ExternalLink className="w-3 h-3" />
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      <span>Open Jira Ticket ({jiraTicket.key})</span>
+                      <ExternalLink className="w-3 h-3 ml-0.5" />
+                    </a>
+                  ) : (
+                    <button
+                      onClick={handleEscalateJira}
+                      disabled={escalatingJira}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-[#0052CC] hover:bg-[#0041a3] text-white transition-all shadow-xs disabled:opacity-75"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      <span>{escalatingJira ? 'Creating Ticket...' : 'Open Jira Ticket'}</span>
+                    </button>
+                  )}
+
+                  {/* Open GitHub PR / Code Commit if GitHub evidence exists */}
+                  {evidenceList.find((e: Evidence) => e.type === 'github' && e.sourceUrl) && (
+                    <a
+                      href={evidenceList.find((e: Evidence) => e.type === 'github' && e.sourceUrl)?.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-900 hover:bg-slate-800 text-white transition-all shadow-xs border border-slate-700"
+                    >
+                      <GitCommit className="w-3.5 h-3.5 text-slate-300" />
+                      <span>Open GitHub PR</span>
+                      <ExternalLink className="w-3 h-3 ml-0.5" />
                     </a>
                   )}
                 </div>
-              )}
+              </div>
 
               {(slackError || jiraError) && (
                 <p className="text-[10px] text-error font-mono leading-tight">

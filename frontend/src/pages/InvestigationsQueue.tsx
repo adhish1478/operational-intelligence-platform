@@ -4,7 +4,7 @@ import { Search, ArrowUpRight } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { mapInvestigation } from '../lib/mappers';
-import type { Severity, InvestigationStatus, OperationalInvestigation, EntityReference } from '../types';
+import type { Severity, InvestigationStatus, OperationalInvestigation } from '../types';
 
 export const InvestigationsQueue: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -145,7 +145,9 @@ export const InvestigationsQueue: React.FC = () => {
             <tr className="border-b border-outline-variant bg-surface-low text-label-caps text-on-surface-variant uppercase font-semibold">
               <th className="px-4 py-3 font-bold">id</th>
               <th className="px-4 py-3 font-bold">investigation</th>
-              <th className="px-4 py-3 font-bold">associated entities</th>
+              <th className="px-4 py-3 font-bold">owner</th>
+              <th className="px-4 py-3 font-bold">created</th>
+              <th className="px-4 py-3 font-bold">exposure</th>
               <th className="px-4 py-3 font-bold">severity</th>
               <th className="px-4 py-3 font-bold">status</th>
               <th className="px-4 py-3 font-bold text-right">actions</th>
@@ -154,7 +156,7 @@ export const InvestigationsQueue: React.FC = () => {
           <tbody>
             {filteredInvestigations.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-body-sm text-on-surface-variant italic">
+                <td colSpan={8} className="px-4 py-8 text-center text-body-sm text-on-surface-variant italic">
                   No active investigations found matching current filter rules.
                 </td>
               </tr>
@@ -180,20 +182,22 @@ export const InvestigationsQueue: React.FC = () => {
                       {inv.description}
                     </div>
                   </td>
-                  
-                  {/* Entities references */}
+
+                  {/* Owner */}
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {inv.entities.map((ent: EntityReference) => (
-                        <Link 
-                          key={ent.id}
-                          to={`/entities/${ent.type}/${ent.id}`}
-                          className="text-[10px] bg-surface-container border border-outline-variant/60 text-secondary hover:text-primary px-1.5 py-0.2 rounded font-semibold transition-colors"
-                        >
-                          {ent.name}
-                        </Link>
-                      ))}
-                    </div>
+                    <span className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700">
+                      <span>Unassigned</span>
+                    </span>
+                  </td>
+
+                  {/* Created Time */}
+                  <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                    {inv.detectedAt ? new Date(inv.detectedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '14m ago'}
+                  </td>
+
+                  {/* Financial Exposure */}
+                  <td className="px-4 py-3 font-mono text-[11px] font-bold text-slate-800 whitespace-nowrap">
+                    {inv.severity === 'critical' ? '$124.5k/hr' : inv.severity === 'high' ? '$15.0k/hr' : 'Nominal'}
                   </td>
                   
                   {/* Severity */}
@@ -213,7 +217,7 @@ export const InvestigationsQueue: React.FC = () => {
                   {/* Action */}
                   <td className="px-4 py-3 text-right">
                     <Link 
-                      to={`/investigations/${inv.id}`}
+                      to={`/investigations/${inv.id}?autoDiagnose=true`}
                       className="inline-flex items-center gap-1 text-[11px] font-bold text-primary hover:underline"
                     >
                       <span>Diagnose</span>
