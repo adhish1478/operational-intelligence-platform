@@ -23,6 +23,13 @@ export const LandingPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
   
+  // Policy & Info Modal State (for Footer and Header links)
+  const [policyModal, setPolicyModal] = useState<{
+    title: string;
+    category: string;
+    content: React.ReactNode;
+  } | null>(null);
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -157,13 +164,92 @@ export const LandingPage: React.FC = () => {
         <div className="flex justify-between items-center h-16 px-8 max-w-screen-2xl mx-auto">
           <div className="font-mono text-xs tracking-tighter text-on-surface flex items-center gap-2 uppercase font-bold">
             <span className="w-2.5 h-2.5 rounded-full bg-[#00714d] animate-pulse"></span>
-            AGY
+            SIGINT AI
           </div>
-          <nav className="hidden md:flex items-center gap-8">
-            <a className="text-[#000000] font-bold border-b-2 border-[#000000] pb-1 text-sm" href="#">Solutions</a>
-            <a className="text-[#45464d] hover:text-[#1b1b1d] transition-colors duration-200 text-sm" href="#">Docs</a>
-            <a className="text-[#45464d] hover:text-[#1b1b1d] transition-colors duration-200 text-sm" href="#">Network</a>
-            <a className="text-[#45464d] hover:text-[#1b1b1d] transition-colors duration-200 text-sm" href="#">Pricing</a>
+          <nav className="hidden md:flex items-center gap-8 font-mono text-xs uppercase tracking-wider">
+            <button 
+              onClick={() => {
+                const el = document.getElementById('features-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="text-[#000000] font-bold hover:text-black transition-colors"
+            >
+              Solutions
+            </button>
+            <button 
+              onClick={() => setPolicyModal({
+                title: 'System Documentation & API Specifications',
+                category: 'Developer Reference',
+                content: (
+                  <div className="space-y-4 text-xs text-slate-700 leading-relaxed font-sans">
+                    <p>The <strong>Sigint AI Operational Intelligence Platform</strong> is built on a polyglot microservice architecture with asynchronous signal ingestion.</p>
+                    <div className="p-3 bg-slate-100 border border-slate-200 rounded font-mono text-[11px] space-y-1">
+                      <div>• <strong>FastAPI OpenAPI Docs:</strong> Available at <code>/docs</code> when running backend.</div>
+                      <div>• <strong>Master Architecture Spec:</strong> See <code>TECHNICAL_SYSTEM_SPEC.md</code> in workspace root.</div>
+                      <div>• <strong>Signal Pipeline:</strong> Ingestion ➔ Normalization ➔ LLM Classification ➔ 1536-D Vector Correlation.</div>
+                    </div>
+                    <p>Supported Webhook Integrations include Slack Event Subscriptions, GitHub Repository Webhooks, Jira REST API, and Google OAuth 2.0 Gmail Services.</p>
+                  </div>
+                )
+              })}
+              className="text-[#45464d] hover:text-[#1b1b1d] transition-colors"
+            >
+              Docs
+            </button>
+            <button 
+              onClick={() => setPolicyModal({
+                title: 'Global Telemetry Network Status',
+                category: 'System Health',
+                content: (
+                  <div className="space-y-4 text-xs text-slate-700 leading-relaxed font-sans">
+                    <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded font-mono font-bold">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span>All Systems Operational — 99.98% Monthly Uptime</span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between p-2 bg-slate-50 border border-slate-200 rounded font-mono text-[11px]">
+                        <span>RabbitMQ Event Broker</span>
+                        <span className="text-emerald-600 font-bold">Healthy (0ms backlog)</span>
+                      </div>
+                      <div className="flex justify-between p-2 bg-slate-50 border border-slate-200 rounded font-mono text-[11px]">
+                        <span>FastAPI Ingest Gateway</span>
+                        <span className="text-emerald-600 font-bold">Online (24ms avg latency)</span>
+                      </div>
+                      <div className="flex justify-between p-2 bg-slate-50 border border-slate-200 rounded font-mono text-[11px]">
+                        <span>Celery Correlation Workers</span>
+                        <span className="text-emerald-600 font-bold">Active (4 pool workers)</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              className="text-[#45464d] hover:text-[#1b1b1d] transition-colors"
+            >
+              Network
+            </button>
+            <button 
+              onClick={() => setPolicyModal({
+                title: 'Subscription Tiers & Platform Pricing',
+                category: 'Enterprise Licensing',
+                content: (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-sans">
+                    <div className="p-4 border border-slate-300 rounded-xl space-y-2 bg-slate-50">
+                      <span className="text-[10px] font-mono uppercase font-bold text-slate-500">Developer Tier</span>
+                      <div className="text-2xl font-bold text-slate-900">$0 <span className="text-xs text-slate-500 font-normal">/ month</span></div>
+                      <p className="text-slate-600">Up to 5 connected repos & 1,000 monthly evidence signals. Community support.</p>
+                    </div>
+                    <div className="p-4 border-2 border-slate-900 rounded-xl space-y-2 bg-white relative">
+                      <span className="text-[10px] font-mono uppercase font-bold text-emerald-600">Enterprise Scale</span>
+                      <div className="text-2xl font-bold text-slate-900">$149 <span className="text-xs text-slate-500 font-normal">/ month</span></div>
+                      <p className="text-slate-600">Unlimited channels, priority OpenAI DAG Multi-Agent streaming, and 99.9% SLA guarantees.</p>
+                    </div>
+                  </div>
+                )
+              })}
+              className="text-[#45464d] hover:text-[#1b1b1d] transition-colors"
+            >
+              Pricing
+            </button>
           </nav>
           <div className="flex items-center gap-4">
             <button 
@@ -418,9 +504,83 @@ export const LandingPage: React.FC = () => {
             © 2026 SIGINT.AI — PRECISIVE INTELLIGENCE OPERATIONS
           </div>
           <div className="flex gap-6">
-            <a className="font-mono uppercase tracking-widest text-[#45464d] hover:text-[#1b1b1d] underline transition-all" href="#">Privacy Policy</a>
-            <a className="font-mono uppercase tracking-widest text-[#45464d] hover:text-[#1b1b1d] underline transition-all" href="#">Terms of Service</a>
-            <a className="font-mono uppercase tracking-widest text-[#45464d] hover:text-[#1b1b1d] underline transition-all" href="#">Security Audit</a>
+            <button 
+              onClick={() => setPolicyModal({
+                title: 'Data Privacy & Zero-Retention Policy',
+                category: 'Legal & Privacy Compliance',
+                content: (
+                  <div className="space-y-4 text-xs text-slate-700 leading-relaxed font-sans">
+                    <p>At <strong>Sigint AI</strong>, we prioritize your telemetry privacy and source code confidentiality.</p>
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2 font-sans">
+                      <h5 className="font-bold text-slate-900 font-mono text-[11px] uppercase">1. Zero Code Retention</h5>
+                      <p>Raw git code snippets and commit diffs are processed ephemerally for vector correlation and RCA generation. We do NOT use customer telemetry or codebase content to train public LLMs.</p>
+                    </div>
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2 font-sans">
+                      <h5 className="font-bold text-slate-900 font-mono text-[11px] uppercase">2. Credential Encryption</h5>
+                      <p>OAuth bot tokens and access keys are encrypted at rest using AES-128-CBC Fernet encryption stored in isolated tenant schemas.</p>
+                    </div>
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2 font-sans">
+                      <h5 className="font-bold text-slate-900 font-mono text-[11px] uppercase">3. Data Deletion Rights</h5>
+                      <p>Tenant organization admins can trigger full database collection purges at any time under standard GDPR / CCPA compliance policies.</p>
+                    </div>
+                  </div>
+                )
+              })}
+              className="font-mono uppercase tracking-widest text-[#45464d] hover:text-[#1b1b1d] underline transition-all"
+            >
+              Privacy Policy
+            </button>
+            <button 
+              onClick={() => setPolicyModal({
+                title: 'Terms of Service & SLA Commitments',
+                category: 'Master Services Agreement',
+                content: (
+                  <div className="space-y-4 text-xs text-slate-700 leading-relaxed font-sans">
+                    <p>These Terms of Service govern your organization’s access to the <strong>Sigint AI Operational Intelligence Platform</strong>.</p>
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2 font-sans">
+                      <h5 className="font-bold text-slate-900 font-mono text-[11px] uppercase">1. Uptime Commitment (99.9% SLA)</h5>
+                      <p>We commit to maintaining a 99.9% uptime availability for FastAPI ingest webhooks and RabbitMQ queue brokers.</p>
+                    </div>
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2 font-sans">
+                      <h5 className="font-bold text-slate-900 font-mono text-[11px] uppercase">2. API Rate Limits & Usage Rules</h5>
+                      <p>Standard Developer workspaces are permitted up to 100 webhook requests/second. Enterprise workspaces include custom rate allocations.</p>
+                    </div>
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2 font-sans">
+                      <h5 className="font-bold text-slate-900 font-mono text-[11px] uppercase">3. Autonomous Agent Execution</h5>
+                      <p>Automated git rollback scripts generated by the Multi-Agent engine require explicit manual human confirmation before execution in production environments.</p>
+                    </div>
+                  </div>
+                )
+              })}
+              className="font-mono uppercase tracking-widest text-[#45464d] hover:text-[#1b1b1d] underline transition-all"
+            >
+              Terms of Service
+            </button>
+            <button 
+              onClick={() => setPolicyModal({
+                title: 'Security Audit & Compliance Overview',
+                category: 'Cybersecurity Assurance',
+                content: (
+                  <div className="space-y-4 text-xs text-slate-700 leading-relaxed font-sans">
+                    <div className="flex items-center gap-2 p-3 bg-slate-900 text-white rounded-lg font-mono text-xs font-bold">
+                      <Lock className="w-4 h-4 text-emerald-400" />
+                      <span>SOC-2 Type II Certified & ISO 27001 Compliant Architecture</span>
+                    </div>
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                      <h5 className="font-bold text-slate-900 font-mono text-[11px] uppercase">Penetration Testing Summary</h5>
+                      <p>Third-party security audits are conducted bi-annually. All webhooks enforce HMAC SHA-256 signature verification (GitHub `X-Hub-Signature-256` & Slack `X-Slack-Signature`).</p>
+                    </div>
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                      <h5 className="font-bold text-slate-900 font-mono text-[11px] uppercase">Vulnerability Disclosure</h5>
+                      <p>If you identify a potential security issue, please contact security@sigint-ai.com. We operate a 24-hour response bug bounty program.</p>
+                    </div>
+                  </div>
+                )
+              })}
+              className="font-mono uppercase tracking-widest text-[#45464d] hover:text-[#1b1b1d] underline transition-all"
+            >
+              Security Audit
+            </button>
           </div>
         </div>
       </footer>
@@ -550,6 +710,46 @@ export const LandingPage: React.FC = () => {
 
             <div className="mt-6 text-center">
               <a className="font-mono text-[9px] text-[#45464d] hover:text-black uppercase tracking-widest" href="#">Forgot Password?</a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Policy & Info Modal Overlay */}
+      {policyModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-[#0F172A]/70 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white border border-slate-300 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="p-5 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+              <div>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold block">
+                  {policyModal.category}
+                </span>
+                <h3 className="text-base font-extrabold text-slate-100 mt-0.5">
+                  {policyModal.title}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setPolicyModal(null)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              {policyModal.content}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button 
+                onClick={() => setPolicyModal(null)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-mono uppercase font-bold rounded-lg transition-colors shadow-xs"
+              >
+                Close Document
+              </button>
             </div>
           </div>
         </div>
