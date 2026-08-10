@@ -26,6 +26,65 @@ class JiraConfigPayload(BaseModel):
     tracked_projects: list[str] = Field(default_factory=list)
 
 
+async def register_jira_webhook_helper(cloud_id: str, access_token: str) -> None:
+    """
+    Dynamically register/update the Jira webhook with Atlassian API using WEBHOOK_BASE_URL.
+    """
+    try:
+        webhook_base = settings.WEBHOOK_BASE_URL or "http://localhost:8000"
+        webhook_target = f"{webhook_base.rstrip('/')}/api/v1/ingest/jira"
+        logger.info(f"Registering Jira webhook target: {webhook_target}")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # 1. Fetch available project keys in Jira workspace for valid JQL filtering
+            proj_resp = await client.get(
+                f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/project",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            project_keys = []
+            if proj_resp.status_code == 200 and isinstance(proj_resp.json(), list):
+                project_keys = [
+                    p.get("key") for p in proj_resp.json()
+                    if isinstance(p, dict) and p.get("key")
+                ]
+
+            if project_keys:
+                keys_formatted = ", ".join(f'"{k}"' for k in project_keys)
+                jql_filter = f"project in ({keys_formatted})"
+            else:
+                jql_filter = 'project != "00000"'
+
+            wh_resp = await client.post(
+                f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/webhook",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "url": webhook_target,
+                    "webhooks": [
+                        {
+                            "events": [
+                                "jira:issue_created",
+                                "jira:issue_updated",
+                                "jira:issue_deleted",
+                                "comment_created",
+                                "comment_updated",
+                                "comment_deleted",
+                                "worklog_created",
+                                "attachment_created",
+                            ],
+                            "jqlFilter": jql_filter,
+                        }
+                    ],
+                },
+            )
+            logger.info(f"Jira webhook registration response [{wh_resp.status_code}]: {wh_resp.text}")
+            print(f"[{get_ist_time_str()}] 🔗 Jira Webhook Registration [{wh_resp.status_code}]: {wh_resp.text}")
+    except Exception as e:
+        logger.warning(f"Failed to auto-register Jira webhook: {e}")
+
+
 @router.get("/authorize")
 async def jira_authorize(token: str):
     """
@@ -160,65 +219,6 @@ async def jira_callback(db: DBSessionDep, code: str, state: str):
 
     await db.commit()
     await db.refresh(integration)
-
-async def register_jira_webhook_helper(cloud_id: str, access_token: str) -> None:
-    """
-    Dynamically register/update the Jira webhook with Atlassian API using WEBHOOK_BASE_URL.
-    """
-    try:
-        webhook_base = settings.WEBHOOK_BASE_URL or "http://localhost:8000"
-        webhook_target = f"{webhook_base.rstrip('/')}/api/v1/ingest/jira"
-        logger.info(f"Registering Jira webhook target: {webhook_target}")
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # 1. Fetch available project keys in Jira workspace for valid JQL filtering
-            proj_resp = await client.get(
-                f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/project",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            project_keys = []
-            if proj_resp.status_code == 200 and isinstance(proj_resp.json(), list):
-                project_keys = [
-                    p.get("key") for p in proj_resp.json()
-                    if isinstance(p, dict) and p.get("key")
-                ]
-
-            if project_keys:
-                keys_formatted = ", ".join(f'"{k}"' for k in project_keys)
-                jql_filter = f"project in ({keys_formatted})"
-            else:
-                jql_filter = 'project != "00000"'
-
-            wh_resp = await client.post(
-                f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/webhook",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "url": webhook_target,
-                    "webhooks": [
-                        {
-                            "events": [
-                                "jira:issue_created",
-                                "jira:issue_updated",
-                                "jira:issue_deleted",
-                                "comment_created",
-                                "comment_updated",
-                                "comment_deleted",
-                                "worklog_created",
-                                "attachment_created",
-                            ],
-                            "jqlFilter": jql_filter,
-                        }
-                    ],
-                },
-            )
-            logger.info(f"Jira webhook registration response [{wh_resp.status_code}]: {wh_resp.text}")
-            print(f"[{get_ist_time_str()}] 🔗 Jira Webhook Registration [{wh_resp.status_code}]: {wh_resp.text}")
-    except Exception as e:
-        logger.warning(f"Failed to auto-register Jira webhook: {e}")
-
 
     await register_jira_webhook_helper(cloud_id, access_token)
 
@@ -440,7 +440,8 @@ async def update_jira_config(
 
     # Re-register Jira webhook with current WEBHOOK_BASE_URL
     try:
-        decrypted_access_token = decrypt_token(integration.access_token)
+        creds = decrypt_credentials(integration.credentials_encrypted)
+        decrypted_access_token = creds.get("access_token")
         cloud_id = (integration.config or {}).get("cloud_id")
         if cloud_id and decrypted_access_token:
             await register_jira_webhook_helper(cloud_id, decrypted_access_token)
