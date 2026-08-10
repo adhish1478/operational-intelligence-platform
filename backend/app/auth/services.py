@@ -30,6 +30,18 @@ class AuthService:
         return result.scalar_one_or_none()
 
     @staticmethod
+    async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | None:
+        """
+        Authenticate user credentials by email and password.
+        """
+        user = await AuthService.get_user_by_email(db, email.lower().strip())
+        if not user:
+            return None
+        if not verify_password(password, user.password_hash):
+            return None
+        return user
+
+    @staticmethod
     async def register_user(db: AsyncSession, user_in: UserCreate) -> User:
         """
         Create a new user record inside PostgreSQL after password hashing.
