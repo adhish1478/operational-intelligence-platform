@@ -161,7 +161,10 @@ async def jira_callback(db: DBSessionDep, code: str, state: str):
     await db.commit()
     await db.refresh(integration)
 
-    # Register Webhook dynamically with Jira if WEBHOOK_BASE_URL is configured
+async def register_jira_webhook_helper(cloud_id: str, access_token: str) -> None:
+    """
+    Dynamically register/update the Jira webhook with Atlassian API using WEBHOOK_BASE_URL.
+    """
     try:
         webhook_base = settings.WEBHOOK_BASE_URL or "http://localhost:8000"
         webhook_target = f"{webhook_base.rstrip('/')}/api/v1/ingest/jira"
@@ -215,6 +218,9 @@ async def jira_callback(db: DBSessionDep, code: str, state: str):
             print(f"[{get_ist_time_str()}] 🔗 Jira Webhook Registration [{wh_resp.status_code}]: {wh_resp.text}")
     except Exception as e:
         logger.warning(f"Failed to auto-register Jira webhook: {e}")
+
+
+    await register_jira_webhook_helper(cloud_id, access_token)
 
     html_content = """
     <!DOCTYPE html>
@@ -431,5 +437,14 @@ async def update_jira_config(
 
     await db.commit()
     await db.refresh(integration)
+
+    # Re-register Jira webhook with current WEBHOOK_BASE_URL
+    try:
+        decrypted_access_token = decrypt_token(integration.access_token)
+        cloud_id = (integration.config or {}).get("cloud_id")
+        if cloud_id and decrypted_access_token:
+            await register_jira_webhook_helper(cloud_id, decrypted_access_token)
+    except Exception as e:
+        logger.warning(f"Failed to re-register Jira webhook on config save: {e}")
 
     return {"status": "success", "config": integration.config}
