@@ -51,15 +51,15 @@ class AuthService:
         return user
 
     @staticmethod
-    async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | None:
+    async def update_user_profile(db: AsyncSession, user: User, first_name: str | None, last_name: str | None) -> User:
         """
-        Authenticate email/password combination. Returns User model if valid, else None.
+        Update user profile first_name and last_name in PostgreSQL.
         """
-        user = await AuthService.get_user_by_email(db, email)
-        if not user:
-            return None
-        if not user.is_active:
-            return None
-        if not verify_password(password, user.password_hash):
-            return None
+        if first_name is not None:
+            user.first_name = first_name.strip()
+        if last_name is not None:
+            user.last_name = last_name.strip()
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
         return user

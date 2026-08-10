@@ -41,6 +41,9 @@ origins = [
     "http://127.0.0.1",
     "https://127.0.0.1",
     "http://0.0.0.0:5173",
+    "https://adhish-oip.duckdns.org",
+    "http://adhish-oip.duckdns.org",
+    "https://sigint-ai.vercel.app",
 ]
 
 app.add_middleware(
