@@ -71,8 +71,8 @@ async def login(
         httponly=True,
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         expires=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-        samesite="lax",
-        secure=settings.ENVIRONMENT == "production",
+        samesite="none",
+        secure=True,
     )
     
     return Token(access_token=access_token)
@@ -134,8 +134,8 @@ async def refresh_access_token(
         httponly=True,
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         expires=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
-        samesite="lax",
-        secure=settings.ENVIRONMENT == "production",
+        samesite="none",
+        secure=True,
     )
     
     return Token(access_token=new_access_token)
@@ -163,8 +163,8 @@ async def logout(
     response.delete_cookie(
         key="refresh_token",
         httponly=True,
-        samesite="lax",
-        secure=settings.ENVIRONMENT == "production",
+        samesite="none",
+        secure=True,
     )
     return {"message": "Logged out successfully"}
 
