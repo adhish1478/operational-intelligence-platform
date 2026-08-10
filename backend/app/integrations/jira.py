@@ -23,7 +23,7 @@ router = APIRouter(prefix="/jira", tags=["integrations"])
 class JiraConfigPayload(BaseModel):
     project_key: str | None = None
     project_name: str | None = None
-    tracked_projects: list[dict[str, Any]] = Field(default_factory=list)
+    tracked_projects: list[str] = Field(default_factory=list)
 
 
 @router.get("/authorize")
