@@ -725,8 +725,13 @@ class IngestService:
             issue = raw_payload.get("issue", {})
             project_key = issue.get("fields", {}).get("project", {}).get("key")
             tracked_projects = config.get("tracked_projects", [])
-            if tracked_projects and project_key and project_key not in tracked_projects:
-                return False, f"Jira project '{project_key}' is not in the tracked projects list."
+            if tracked_projects and project_key:
+                allowed_keys = [
+                    p.get("key") if isinstance(p, dict) else str(p)
+                    for p in tracked_projects
+                ]
+                if project_key not in allowed_keys:
+                    return False, f"Jira project '{project_key}' is not in the tracked projects list."
 
         return True, None
 
