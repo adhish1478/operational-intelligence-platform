@@ -36,10 +36,35 @@ async def register_jira_webhook_helper(cloud_id: str, access_token: str) -> None
         logger.info(f"Registering Jira webhook target: {webhook_target}")
 
         async with httpx.AsyncClient(timeout=10.0) as client:
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            }
+            # 0. Fetch and clear any stale registered webhooks for this user account
+            try:
+                existing_wh_resp = await client.get(
+                    f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/webhook",
+                    headers=headers,
+                )
+                if existing_wh_resp.status_code == 200:
+                    wh_data = existing_wh_resp.json()
+                    values = wh_data.get("values", []) if isinstance(wh_data, dict) else []
+                    webhook_ids = [w.get("id") for w in values if isinstance(w, dict) and w.get("id")]
+                    if webhook_ids:
+                        logger.info(f"Clearing {len(webhook_ids)} existing Jira webhook(s): {webhook_ids}")
+                        await client.request(
+                            "DELETE",
+                            f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/webhook",
+                            headers=headers,
+                            json={"webhookIds": webhook_ids},
+                        )
+            except Exception as clean_err:
+                logger.warning(f"Failed to clear existing Jira webhooks: {clean_err}")
+
             # 1. Fetch available project keys in Jira workspace for valid JQL filtering
             proj_resp = await client.get(
                 f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/project",
-                headers={"Authorization": f"Bearer {access_token}"},
+                headers=headers,
             )
             project_keys = []
             if proj_resp.status_code == 200 and isinstance(proj_resp.json(), list):
@@ -56,10 +81,7 @@ async def register_jira_webhook_helper(cloud_id: str, access_token: str) -> None
 
             wh_resp = await client.post(
                 f"https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/webhook",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                },
+                headers=headers,
                 json={
                     "url": webhook_target,
                     "webhooks": [
