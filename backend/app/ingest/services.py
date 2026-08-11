@@ -585,6 +585,8 @@ class IngestService:
 
         try:
             import httpx
+            ist_now = get_ist_time_str()
+            print(f"[{ist_now}] 🤖 [OpenAI] Calling Embedding API (text-embedding-3-small) for: '{clean_text[:60]}...'")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
                     "https://api.openai.com/v1/embeddings",
@@ -601,9 +603,13 @@ class IngestService:
                     data = response.json()
                     embedding = data.get("data", [{}])[0].get("embedding")
                     if isinstance(embedding, list):
+                        print(f"[{ist_now}] ✅ [OpenAI] Embedding generated successfully (1536 dims)")
                         return [float(v) for v in embedding]
-        except Exception:
-            pass
+                else:
+                    print(f"[{ist_now}] ❌ [OpenAI] Embedding API failed [{response.status_code}]: {response.text}")
+        except Exception as e:
+            ist_now = get_ist_time_str()
+            print(f"[{ist_now}] ❌ [OpenAI] Embedding Exception: {e}")
 
         return None
 
@@ -1135,6 +1141,8 @@ class IngestService:
                 inc_vector=inc_vector,
                 inv_vector=inv_vector
             )
+            ist_now = get_ist_time_str()
+            print(f"[{ist_now}] 🔍 [Correlator] Candidate: '{inv.title[:40]}' | Score: {score:.4f} (Threshold: 0.25)")
 
             # Minimum correlation confidence threshold (0.25)
             if score >= 0.25 and score > best_score:
