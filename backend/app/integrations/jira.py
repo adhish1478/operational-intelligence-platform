@@ -93,8 +93,6 @@ async def register_jira_webhook_helper(cloud_id: str, access_token: str) -> None
                                 "comment_created",
                                 "comment_updated",
                                 "comment_deleted",
-                                "worklog_created",
-                                "attachment_created",
                             ],
                             "jqlFilter": jql_filter,
                         }
