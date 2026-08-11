@@ -1142,10 +1142,10 @@ class IngestService:
                 inv_vector=inv_vector
             )
             ist_now = get_ist_time_str()
-            print(f"[{ist_now}] 🔍 [Correlator] Candidate: '{inv.title[:40]}' | Score: {score:.4f} (Threshold: 0.25)")
+            print(f"[{ist_now}] 🔍 [Correlator] Candidate: '{inv.title[:40]}' | Score: {score:.4f} (Threshold: 0.45)")
 
-            # Minimum correlation confidence threshold (0.25)
-            if score >= 0.25 and score > best_score:
+            # Minimum correlation confidence threshold (0.45)
+            if score >= 0.45 and score > best_score:
                 best_score = score
                 best_match = inv
 
@@ -1264,12 +1264,16 @@ class IngestService:
             if event_type in ("comment_created", "comment_updated", "comment_deleted", "attachment_created", "worklog_created", "jira:issue_deleted"):
                 return False
 
-            # High priority issues or Bug/Incident issue types -> incident-worthy
+            # High priority issues (Highest, High, Critical, P0, P1, Blocker) -> incident-worthy
             if priority in ("highest", "high", "critical", "p0", "p1", "blocker"):
                 return True
 
             if issue_type in ("bug", "incident", "security", "vulnerability"):
-                return True
+                import re
+                incident_keywords = {"outage", "error", "failed", "failure", "leak", "crash", "panic", "fatal", "broken", "security", "down", "issue", "bug", "latency", "timeout", "exception", "permission", "aws", "cloud", "group", "db", "database", "prod", "production"}
+                words = set(re.findall(r'\b[a-zA-Z]{3,}\b', full_text))
+                if len(summary) >= 10 and words.intersection(incident_keywords):
+                    return True
 
             return False
 
