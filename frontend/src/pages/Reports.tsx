@@ -21,30 +21,13 @@ export const Reports: React.FC = () => {
 
   const investigations: OperationalInvestigation[] = (rawInvs || []).map(mapInvestigation);
 
-  const reports = investigations.length > 0
-    ? investigations.map((inv) => ({
-        id: inv.id,
-        title: `Post-Mortem: ${inv.title}`,
-        type: (inv.severity === 'critical' ? 'Incident Post-Mortem' : inv.severity === 'high' ? 'Security Audit' : 'Weekly Digest') as any,
-        date: inv.detectedAt ? new Date(inv.detectedAt).toISOString().split('T')[0] : '2026-07-27',
-        impactSummary: inv.suggestedAction || inv.description || 'Assesses system root causes, telemetry logs, and remediation policies.'
-      }))
-    : [
-        { 
-          id: '1', 
-          title: 'Q2 Authentication Services SLA Audit', 
-          type: 'Security Audit' as const, 
-          date: '2026-06-12', 
-          impactSummary: 'Assesses Auth Gateway Redis connection spikes. Outlines 4 recommendations for branch configuration policies.' 
-        },
-        { 
-          id: '2', 
-          title: 'Weekly Operational Intelligence Digest - W24', 
-          type: 'Weekly Digest' as const, 
-          date: '2026-06-08', 
-          impactSummary: 'Summarizes TechCorp customer escalation details, developer blockers velocity impact, and connected workspace sync status.' 
-        }
-      ];
+  const reports = investigations.map((inv) => ({
+    id: inv.id,
+    title: `Post-Mortem: ${inv.title}`,
+    type: (inv.severity === 'critical' ? 'Incident Post-Mortem' : inv.severity === 'high' ? 'Security Audit' : 'Weekly Digest') as any,
+    date: inv.detectedAt ? new Date(inv.detectedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+    impactSummary: inv.suggestedAction || inv.description || 'Assesses system root causes, telemetry logs, and remediation policies.'
+  }));
 
   const handleExportPdf = (rep: { title: string; type: string; date: string; impactSummary: string }) => {
     const reportText = `==================================================
@@ -146,9 +129,18 @@ Service Assistant Operational Intelligence Platform
         </div>
       )}
 
-      {/* Reports Grid List */}
+      {/* Reports List */}
       <div className="space-y-4">
-        {reports.map(rep => (
+        {reports.length === 0 ? (
+          <div className="bg-surface border border-outline-variant rounded-lg p-12 text-center space-y-3">
+            <FileBarChart className="w-10 h-10 text-outline mx-auto" />
+            <h3 className="text-body-lg font-bold text-on-surface">No Reports Generated Yet</h3>
+            <p className="text-body-sm text-on-surface-variant max-w-md mx-auto">
+              Once operational telemetry is ingested and active investigations are detected, post-mortems and intelligence digests will appear here automatically.
+            </p>
+          </div>
+        ) : (
+          reports.map(rep => (
           <div 
             key={rep.id} 
             onClick={() => setSelectedReport(rep)}
@@ -201,7 +193,8 @@ Service Assistant Operational Intelligence Platform
             </div>
 
           </div>
-        ))}
+        ))
+        )}
       </div>
 
       {/* Interactive Report Reader Modal */}
