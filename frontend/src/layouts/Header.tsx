@@ -18,7 +18,7 @@ export const Header: React.FC = () => {
 
     // Find active organization details
     const activeOrg = user?.organizations?.find(o => o.id === activeOrgId) || user?.organizations?.[0];
-    const orgName = activeOrg ? activeOrg.name : 'Platform Engineering';
+    const orgName = activeOrg ? activeOrg.name : (user?.first_name ? `${user.first_name}'s Organization` : 'My Organization');
 
     // Fetch active investigations for real-time notifications
     const { data: rawInvs } = useQuery({

@@ -4,6 +4,7 @@ export interface OrganizationRef {
   id: string;
   name: string;
   slug: string;
+  role?: string;
 }
 
 export interface UserProfile {

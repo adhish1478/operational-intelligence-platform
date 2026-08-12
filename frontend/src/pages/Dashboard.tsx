@@ -28,7 +28,7 @@ export const Dashboard: React.FC = () => {
   const activeOrgId = useAuthStore((state) => state.activeOrgId);
   const operatorName = user?.first_name || 'Operator';
   const activeOrg = user?.organizations?.find(o => o.id === activeOrgId) || user?.organizations?.[0];
-  const orgName = activeOrg ? activeOrg.name : 'Platform Engineering';
+  const orgName = activeOrg ? activeOrg.name : (user?.first_name ? `${user.first_name}'s Organization` : 'My Organization');
 
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(null);
 

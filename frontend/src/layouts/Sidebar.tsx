@@ -30,8 +30,8 @@ export const Sidebar: React.FC = () => {
 
     // Find active organization details
     const activeOrg = user?.organizations?.find(o => o.id === activeOrgId) || user?.organizations?.[0];
-    const orgName = activeOrg ? activeOrg.name : 'Platform Engineering';
-    const orgSlug = activeOrg ? activeOrg.slug : 'platform-eng';
+    const orgName = activeOrg ? activeOrg.name : (user?.first_name ? `${user.first_name}'s Organization` : 'My Organization');
+    const orgSlug = activeOrg ? activeOrg.slug : 'workspace';
 
     // Calculate avatar initials
     const initials = user?.first_name 

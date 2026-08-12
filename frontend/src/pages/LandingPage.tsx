@@ -34,6 +34,7 @@ export const LandingPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [organizationName, setOrganizationName] = useState('');
   
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -138,7 +139,8 @@ export const LandingPage: React.FC = () => {
           email,
           password,
           first_name: firstName,
-          last_name: lastName
+          last_name: lastName,
+          organization_name: organizationName
         }),
       });
 
@@ -625,6 +627,17 @@ export const LandingPage: React.FC = () => {
                       placeholder="Doe" 
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="block font-mono text-[9px] text-[#45464d] mb-1 uppercase tracking-widest font-bold">Organization / Company Name</label>
+                  <input 
+                    type="text"
+                    value={organizationName}
+                    onChange={(e) => setOrganizationName(e.target.value)}
+                    className="w-full bg-[#F7F9FB] border border-[#c6c6cd] p-3 focus:border-black focus:outline-none text-xs rounded transition-all" 
+                    placeholder="Acme Corp" 
+                    required
+                  />
                 </div>
                 <div>
                   <label className="block font-mono text-[9px] text-[#45464d] mb-1 uppercase tracking-widest font-bold">Work Email</label>

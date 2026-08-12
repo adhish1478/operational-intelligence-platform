@@ -7,6 +7,17 @@ from pydantic import BaseModel, EmailStr, Field
 # User Schemas
 # -----------------------------------------------------------------------------
 
+class OrganizationRef(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    role: str | None = "member"
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
 class UserBase(BaseModel):
     email: EmailStr = Field(description="Unique email address of the user")
     first_name: str | None = Field(None, max_length=100)
@@ -15,11 +26,20 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(min_length=8, max_length=128, description="Plaintext password")
+    organization_name: str | None = Field(None, max_length=100, description="Optional organization or company name")
 
 
 class UserUpdate(BaseModel):
     first_name: str | None = Field(None, max_length=100)
     last_name: str | None = Field(None, max_length=100)
+
+
+class ProfileUpdatePayload(BaseModel):
+    full_name: str | None = Field(None, max_length=200)
+    first_name: str | None = Field(None, max_length=100)
+    last_name: str | None = Field(None, max_length=100)
+    email: EmailStr | None = None
+    role: str | None = Field(None, max_length=100)
 
 
 class UserRead(UserBase):
@@ -28,6 +48,7 @@ class UserRead(UserBase):
     is_verified: bool
     created_at: datetime
     updated_at: datetime
+    organizations: list[OrganizationRef] = []
 
     model_config = {
         "from_attributes": True  # Pydantic v2 ORM compatibility configuration

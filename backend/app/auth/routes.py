@@ -3,7 +3,7 @@ import jwt
 from fastapi import APIRouter, Response, Request, status, HTTPException
 from app.api.deps import DBSessionDep, CurrentUserDep, TokenDep
 
-from app.auth.schemas import UserCreate, UserRead, Token, UserLogin
+from app.auth.schemas import UserCreate, UserRead, Token, UserLogin, ProfileUpdatePayload
 from app.auth.services import AuthService
 from app.core.security import create_token, decode_token
 from app.core.config import settings
@@ -142,12 +142,32 @@ async def refresh_access_token(
 
 
 @router.get("/me", response_model=UserRead)
-async def get_current_profile(current_user: CurrentUserDep) -> UserRead:
+async def get_current_profile(db: DBSessionDep, current_user: CurrentUserDep) -> UserRead:
     """
     Retrieve authentication details of the currently authenticated active user.
     Uses the CurrentUserDep dependency to validate the Access Token.
     """
+    await AuthService.populate_user_organizations(db, current_user)
     return current_user
+
+
+@router.patch("/me", response_model=UserRead)
+async def update_current_profile(
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+    payload: ProfileUpdatePayload
+) -> UserRead:
+    """
+    Update the authenticated user's name, email, and role in PostgreSQL.
+    """
+    try:
+        updated_user = await AuthService.update_user_profile(db, current_user, payload)
+        return updated_user
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
