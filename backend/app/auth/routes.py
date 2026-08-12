@@ -142,12 +142,11 @@ async def refresh_access_token(
 
 
 @router.get("/me", response_model=UserRead)
-async def get_current_profile(db: DBSessionDep, current_user: CurrentUserDep) -> UserRead:
+async def get_current_profile(current_user: CurrentUserDep) -> UserRead:
     """
     Retrieve authentication details of the currently authenticated active user.
     Uses the CurrentUserDep dependency to validate the Access Token.
     """
-    await AuthService.populate_user_organizations(db, current_user)
     return current_user
 
 

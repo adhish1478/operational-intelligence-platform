@@ -20,26 +20,34 @@ class AuthService:
         """
         Fetch user's memberships and organizations, attaching an `organizations` list to the User object.
         """
-        stmt = (
-            select(Membership)
-            .options(selectinload(Membership.organization))
-            .where(Membership.user_id == user.id)
-        )
-        res = await db.execute(stmt)
-        memberships = res.scalars().all()
-        
-        org_refs = []
-        for m in memberships:
-            if m.organization:
-                org_refs.append(
-                    OrganizationRef(
-                        id=m.organization.id,
-                        name=m.organization.name,
-                        slug=m.organization.slug,
-                        role=m.role
+        if not user or not hasattr(user, "id"):
+            return user
+
+        try:
+            stmt = (
+                select(Membership)
+                .options(selectinload(Membership.organization))
+                .where(Membership.user_id == user.id)
+            )
+            res = await db.execute(stmt)
+            memberships = res.scalars().all()
+            
+            org_refs = []
+            for m in memberships:
+                if m and m.organization:
+                    org_refs.append(
+                        OrganizationRef(
+                            id=m.organization.id,
+                            name=m.organization.name,
+                            slug=m.organization.slug,
+                            role=m.role or "member"
+                        )
                     )
-                )
-        setattr(user, "organizations", org_refs)
+            setattr(user, "organizations", org_refs)
+        except Exception as e:
+            print(f"⚠️ Could not populate user organizations: {e}")
+            setattr(user, "organizations", [])
+
         return user
 
     @staticmethod
